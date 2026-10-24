@@ -37,7 +37,10 @@ RULES: list[tuple[str, str, str, str, str]] = [
     ("additional_props_closed", "additionalProperties 改为 false", "request", BREAKING, "老调用多传的字段会被拒"),
     ("response_prop_removed", "返回字段减少", "response", BREAKING, "老调用读不到"),
     ("response_required_removed", "返回字段不再保证存在", "response", BREAKING, "老调用可能拿到 null"),
+    ("response_required_added", "返回字段变为必有", "response", SAFE, "老客户端多了一个可读字段"),
     ("response_enum_expanded", "返回 enum 扩大", "response", BREAKING, "老客户端不认识新值"),
+    ("union_changed", "oneOf/anyOf/allOf 分支内容变化", "both", RISKY, "顺序不同不算；内容变了无法程序化确认兼容性"),
+    ("output_schema_removed", "不再声明返回 schema", "response", RISKY, "客户端无法校验返回值"),
 ]
 
 

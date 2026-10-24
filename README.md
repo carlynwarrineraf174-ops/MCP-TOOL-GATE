@@ -3,6 +3,8 @@
 > 一句话：**别人做 MCP 工具，我做「保证工具改了之后不会悄悄弄坏调用方」的那一层。**
 >
 > 它回答一个具体问题：*一个按旧契约写的 Agent，在新版本的工具上还能不能跑？*
+>
+> 📋 **路线与验收**：见上级目录 `mcp-tool-gate-项目规划.md`（M2 补规则 → M3 评测 → M4 CI → M5 影响面归因 → M6 治理层）
 
 ---
 
@@ -43,7 +45,7 @@ worst=BREAKING  BREAKING=2  RISKY=1  SAFE=1
 | **RISKY** | 不坏代码，但改变行为或模型选择 | oasdiff `WARN` |
 | **SAFE** | 向后兼容 | oasdiff `INFO` |
 
-完整规则表（18 条，含每条的理由）见 `gate/rules.py`，跑一次会附在 `report.md` 末尾。
+完整规则表（20 条，含每条的理由）见 `gate/rules.py`，跑一次会附在 `report.md` 末尾。
 
 ## 三条设计判断（面试会追问）
 
@@ -70,7 +72,7 @@ mcp-tool-gate/
 ├─ examples/break_it.py       # 把 v1 改坏成 v2（"改坏实验"产品化）
 ├─ gate/snapshot.py           # 连上去取 tools/list，落盘 + sha256
 ├─ gate/diff.py               # 心脏：$ref 展开 / oneOf 归一化 / 请求响应分向
-├─ gate/rules.py              # 18 条规则表（纯数据，每条形如"为什么这么判"）
+├─ gate/rules.py              # 20 条规则表（纯数据，每条形如"为什么这么判"）
 ├─ gate/check.py              # CLI：报告 + 退出码
 ├─ tests/                     # 21 个用例（含 5 个"不该报警"的负例）
 └─ snapshots/v1, v2/          # 基线快照（提交进 git，CI 才有得比）
