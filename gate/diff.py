@@ -20,6 +20,25 @@ _ONE_OF_KEYS = ("oneOf", "anyOf", "allOf")
 _TIGHTEN_UP = ("minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties")
 _TIGHTEN_DOWN = ("maximum", "exclusiveMaximum", "maxLength", "maxItems", "maxProperties")
 
+# 我们"真正比较过"或"确认无需比较"的关键字。
+# 不在这张表里的关键字一旦出现/变化 → 一律 RISKY 转人工 review（宁报不漏）。
+# 这条设计抄自 ToolDelta："Unsupported keywords require review even when unchanged"。
+_KNOWN_KEYS = frozenset({
+    # 结构
+    "type", "properties", "required", "items", "prefixItems", "additionalProperties",
+    "oneOf", "anyOf", "allOf", "not", "if", "then", "else",
+    "dependentRequired", "dependentSchemas", "dependencies", "propertyNames",
+    # 取值约束
+    "enum", "const", "pattern", "format", "multipleOf",
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+    "minLength", "maxLength", "minItems", "maxItems", "uniqueItems",
+    "contains", "minContains", "maxContains", "minProperties", "maxProperties",
+    # 元数据（不影响调用，已知即可）
+    "title", "description", "default", "examples", "deprecated",
+    "readOnly", "writeOnly", "$schema", "$id", "$comment", "$defs", "definitions",
+    "contentMediaType", "contentEncoding", "contentSchema", "discriminator", "nullable",
+})
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -181,6 +200,20 @@ def _diff_object(old: dict, new: dict, out: list, tool: str, path: str, side: st
                  "additionalProperties 改为 false，老调用多传的字段会被拒")
 
 
+def _diff_unsupported(old: dict, new: dict, out: list, tool: str, path: str) -> None:
+    """没见过的关键字 → 转人工 review。
+
+    为什么这条重要：静默放过 = 给调用方一个**虚假的通过信号**。
+    漏报比误报贵得多 —— 误报可以关掉，漏报会在线上炸。
+    """
+    for key in sorted(set(old) | set(new)):
+        if key in _KNOWN_KEYS or key.startswith("x-"):
+            continue
+        if old.get(key) != new.get(key):
+            _add(out, tool, f"{path}.{key}", "unsupported_keyword", RISKY,
+                 f"未支持的 JSON Schema 关键字 `{key}` 发生变化 → 转人工 review")
+
+
 def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
     if not isinstance(old, dict) or not isinstance(new, dict):
         return
@@ -188,6 +221,14 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
     if old.get("type") and new.get("type") and old["type"] != new["type"]:
         _add(out, tool, path, "type_changed", BREAKING,
              f"类型 {old['type']} → {new['type']}")
+
+    if old.get("const") != new.get("const") and new.get("const") is not None:
+        _add(out, tool, f"{path}.const", "const_changed", BREAKING,
+             f"const {old.get('const')!r} → {new.get('const')!r}（取值被钉死）")
+
+    if old.get("pattern") != new.get("pattern"):
+        _add(out, tool, f"{path}.pattern", "pattern_changed", RISKY,
+             "正则变化：无法程序化判定包含关系 → 转人工 review")
 
     if "description" in old and "description" in new and old["description"] != new["description"]:
         _add(out, tool, f"{path}.description", "description_changed", RISKY,
@@ -211,6 +252,7 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
         _diff_node(old["items"], new["items"], out, tool, f"{path}[]", side)
 
     _diff_object(old, new, out, tool, path, side)
+    _diff_unsupported(old, new, out, tool, path)
 
 
 # ---------------------------------------------------------------- 入口

@@ -41,6 +41,9 @@ RULES: list[tuple[str, str, str, str, str]] = [
     ("response_enum_expanded", "返回 enum 扩大", "response", BREAKING, "老客户端不认识新值"),
     ("union_changed", "oneOf/anyOf/allOf 分支内容变化", "both", RISKY, "顺序不同不算；内容变了无法程序化确认兼容性"),
     ("output_schema_removed", "不再声明返回 schema", "response", RISKY, "客户端无法校验返回值"),
+    ("const_changed", "const 值变化 / 新增", "both", BREAKING, "取值被钉死，老调用可能传别的值"),
+    ("pattern_changed", "正则 pattern 变化", "request", RISKY, "正则包含关系无法程序化判定 → 转人工 review"),
+    ("unsupported_keyword", "未支持的关键字发生变化", "both", RISKY, "静默放过 = 虚假的通过信号；漏报比误报贵"),
 ]
 
 

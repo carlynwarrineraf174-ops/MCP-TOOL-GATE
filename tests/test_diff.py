@@ -125,6 +125,38 @@ class DiffTest(unittest.TestCase):
         t = tool(obj(city=STR))
         self.assertEqual(diff_snapshots({"t": t}, {"t": t}), [])
 
+    # ---- 保守策略：看不懂的一律转人工 review ----
+    def test_const_changed_is_breaking(self):
+        old = tool(obj(unit={"type": "string"}))
+        new = tool(obj(unit={"type": "string", "const": "c"}))
+        self.assertIn("const_changed", {x.kind for x in diff_snapshots({"t": old}, {"t": new})})
+
+    def test_pattern_changed_is_risky(self):
+        old = tool(obj(order_id={"type": "string", "pattern": "^[A-Z]"}))
+        new = tool(obj(order_id={"type": "string", "pattern": "^[A-Z]{2}"}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("pattern_changed", {x.kind for x in found})
+        self.assertEqual(worst(found), RISKY)
+
+    def test_unknown_keyword_is_risky(self):
+        """没见过的关键字变化 → 必须转人工，不能静默通过。"""
+        old = tool(obj(city={**STR, "readOnlyForAgents": True}))
+        new = tool(obj(city={**STR, "readOnlyForAgents": False}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("unsupported_keyword", {x.kind for x in found})
+        self.assertEqual(worst(found), RISKY)
+
+    def test_unknown_keyword_unchanged_is_silent(self):
+        """负例：不认识但没变的关键字，不该刷屏。"""
+        schema = {"type": "object", "properties": {"city": {**STR, "readOnlyForAgents": True}}}
+        self.assertEqual(diff_snapshots({"t": tool(schema)}, {"t": tool(schema)}), [])
+
+    def test_title_change_is_silent(self):
+        """负例：title 只是 UI 元数据，改它不该报警。"""
+        old = tool(obj(city={"type": "string", "title": "City"}))
+        new = tool(obj(city={"type": "string", "title": "城市"}))
+        self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+
     # ---- $ref：只比指针字符串会漏判 ----
     def test_ref_expanded_then_compared(self):
         old_inner = {"type": "string"}
