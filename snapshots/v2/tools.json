@@ -1,0 +1,79 @@
+{
+  "cancel_order": {
+    "description": "取消一笔未发货订单。",
+    "input_schema": {
+      "properties": {
+        "order_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "type": "object"
+    },
+    "output_schema": null
+  },
+  "get_weather": {
+    "description": "查询指定城市的实时天气（含湿度）。",
+    "input_schema": {
+      "properties": {
+        "city": {
+          "title": "City",
+          "type": "string"
+        },
+        "unit": {
+          "default": "c",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "city"
+      ],
+      "title": "get_weatherArguments",
+      "type": "object"
+    },
+    "output_schema": null
+  },
+  "query_order": {
+    "description": "按订单号查询订单状态。",
+    "input_schema": {
+      "properties": {
+        "order_id": {
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "title": "query_orderArguments",
+      "type": "object"
+    },
+    "output_schema": null
+  },
+  "search_doc": {
+    "description": "在知识库里检索相关文档片段。",
+    "input_schema": {
+      "properties": {
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "top_k": {
+          "default": 3,
+          "maximum": 5,
+          "title": "Top K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "search_docArguments",
+      "type": "object"
+    },
+    "output_schema": null
+  }
+}
