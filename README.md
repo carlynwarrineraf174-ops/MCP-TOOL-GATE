@@ -55,6 +55,18 @@ worst=BREAKING  BREAKING=2  RISKY=1  SAFE=1
 
 第四条更细：**`default` 不是兼容性保证**。加 `required` 即使带 `default` 也判 BREAKING —— `default` 是服务端兜底，不是契约。
 
+## 为什么门禁本身不用 LLM（LangChain / LangGraph 用在哪）
+
+**分层，不是不会用**：
+
+| 层 | 用什么 | 为什么 |
+|---|---|---|
+| **判定层**（本仓库 `gate/`） | 纯确定性代码，**零依赖网络** | 跑在 CI 里，同一个 commit 必须每次结论一致；用 LLM 判"破不破坏"会出现两次跑出两个结果，这种门禁没人敢用 |
+| **被测对象**（M3 `sut/agent.py`） | **LangGraph + LangChain（`langchain-mcp-adapters`）** | 评测要量的是"真 Agent 在真 schema 下选对工具的概率"，假模型算出来的是噪声 |
+| **语义路由**（M6 `govern/router.py`） | 工具描述 embedding / 可选 LC 组件 | 20+ 工具时上下文膨胀，要靠召回降 token |
+
+所以 LangChain/LangGraph 在这个项目里是**被测对象与路由**，不是判定引擎。**把 LLM 塞进 diff 是负分**——面试官会问"你为什么要用框架做字符串比较"。
+
 ## 与现有工具的差别（为什么要自己写）
 
 | 工具 | 它做什么 | 我不做什么 / 我做什么 |
