@@ -45,6 +45,10 @@ RULES: list[tuple[str, str, str, str, str]] = [
     ("pattern_changed", "正则 pattern 变化", "request", RISKY, "正则包含关系无法程序化判定 → 转人工 review"),
     ("unsupported_keyword", "未支持的关键字发生变化", "both", RISKY, "静默放过 = 虚假的通过信号；漏报比误报贵"),
     ("dependent_required_added", "字段间依赖变严", "request", BREAKING, "等于给老调用加了一条隐性必填"),
+    ("format_changed", "format 变化", "both", RISKY, "无法确认是否收窄，转人工"),
+    ("readonly_added", "入参新增 readOnly", "request", BREAKING, "字段不再接受外部传入"),
+    ("unique_items_changed","uniqueItems变化","both",BREAKING,"原来能传重复值，现在会被拒"),
+    ("prefix_items_changed","prefixItems 数量或内容变化","both",RISKY,"数组结构变化，无法程序化确认兼容"),
 ]
 
 

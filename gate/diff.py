@@ -153,6 +153,7 @@ def _diff_range(old: dict, new: dict, out: list, tool: str, path: str, side: str
 
 
 def _diff_object(old: dict, new: dict, out: list, tool: str, path: str, side: str) -> None:
+
     old_props = old.get("properties") or {}
     new_props = new.get("properties") or {}
     old_req = set(old.get("required") or [])
@@ -247,6 +248,11 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
             _add(out, tool, f"{path}.default", "default_changed", RISKY,
                  f"default {old.get('default')!r} → {new.get('default')!r}")
 
+    # 在 _diff_node 里找地方加：
+    if old.get("format") != new.get("format"):
+        _add(out, tool, f"{path}.format", "format_changed", RISKY,
+             f"format 从 {old.get('format')} 变为 {new.get('format')}")
+
     _diff_enum(old, new, out, tool, path, side)
     _diff_range(old, new, out, tool, path, side)
 
@@ -258,6 +264,26 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
 
     if isinstance(old.get("items"), dict) and isinstance(new.get("items"), dict):
         _diff_node(old["items"], new["items"], out, tool, f"{path}[]", side)
+
+    # if old.get("readOnly") is not True and new.get("readOnly") is True:
+    #     _add(out, tool, f"{path}.readOnly", "readonly_added", BREAKING,
+    #          "入参变更为 readOnly，拒绝外部传入")
+    if old.get("readOnly") is not True and new.get("readOnly") is True:
+        _add(out, tool, f"{path}.readOnly", "readonly_added", BREAKING,
+             "入参变更为 readOnly，拒绝外部传入")
+
+    if old.get("uniqueItems") is not True and new.get("uniqueItems") is True:
+        _add(out, tool, f"{path}.uniqueItems", "unique_items_changed", BREAKING,
+             "原来能传重复值，现在会被拒")
+
+    if old.get("prefixItems") != new.get("prefixItems"):
+        _add(out, tool, f"{path}.prefixItems", "prefix_items_changed", RISKY,
+             "数组结构变化，无法程序化确认兼容")
+
+    # print("====== 我进入 _diff_object 啦 ======")
+    # print("旧的 old 是:", old)
+    # print("新的 new 是:", new)
+    # print("当前路径 path 是:", path)
 
     _diff_object(old, new, out, tool, path, side)
     _diff_unsupported(old, new, out, tool, path)

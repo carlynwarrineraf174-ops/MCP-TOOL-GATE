@@ -166,19 +166,6 @@ class DiffTest(unittest.TestCase):
         self.assertEqual(prepare_schema(old["input_schema"])["properties"]["city"], old_inner)
         self.assertIn("type_changed", {x.kind for x in diff_snapshots({"t": old}, {"t": new})})
 
-    # def test_dependent_required_added_is_breaking(self):
-    #     old = tool({"type": "object", "properties": {"card": STR, "addr": STR}})
-    #     new = tool({"type": "object", "properties": {"card": STR, "addr": STR},
-    #                 "dependentRequired": {"card": ["addr"]}})
-    #     found = diff_snapshots({"t": old}, {"t": new})
-    #     self.assertIn("dependent_required_added", {x.kind for x in found})
-    #     self.assertEqual(worst(found), BREAKING)
-    #
-    # def test_dependent_required_removed_is_safe(self):
-    #     old = tool({"type": "object", "properties": {"card": STR, "addr": STR},
-    #                 "dependentRequired": {"card": ["addr"]}})
-    #     new = tool({"type": "object", "properties": {"card": STR, "addr": STR}})
-    #     self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
     def test_dependent_required_added_is_breaking(self):
         old = tool({"type":"object","properties":{"card": STR, "addr": STR}})
         new = tool({"type":"object","properties":{"card": STR, "addr": STR}, "dependentRequired":{"card": ["addr"]}})
@@ -191,6 +178,51 @@ class DiffTest(unittest.TestCase):
         old = tool({"type": "object", "properties": {"card": STR, "addr": STR}, "dependentRequired":{"card": ["addr"]}})
         new = tool({"type": "object", "properties": {"card": STR, "addr": STR}})
         self.assertEqual(diff_snapshots({"t": old},{"t": new}), [])
+
+
+    def test_format_changed(self):
+        old = tool(obj(birthday = {"type": "string", "format": "date"}))
+        new = tool(obj(birthday = {"type": "string", "format": "date-time"}))
+        found = diff_snapshots({"t" : old}, {"t": new})
+        self.assertIn("format_changed",{x.kind for x in found})
+        self.assertEqual(worst(found), RISKY)
+
+
+    def test_readonly_added_is_breaking(self):
+        old = tool(obj(city = STR))
+        new = tool(obj(city = {**STR, "readOnly" : True}))
+        found = diff_snapshots({"t" : old},{"t": new})
+        self.assertIn("readonly_added",{x.kind for x in found})
+        self.assertEqual(worst(found),BREAKING)
+
+        old1 = tool(obj(city = {**STR, "readOnly" : True}))
+        new1 = tool(obj(city = {**STR, "readOnly" : False}))
+        found1 = diff_snapshots({"t": old1},{"t": new1})
+        self.assertEqual(found1,[])
+
+    def test_unique_items_changed_is_breaking(self):
+        old = tool(obj(city = {**STR, "uniqueItems" : False}))
+        new = tool(obj(city = {**STR, "uniqueItems" : True}))
+        found = diff_snapshots({"t" : old},{"t" : new})
+        self.assertIn("unique_items_changed",{x.kind for x in found})
+        self.assertEqual(worst(found),BREAKING)
+
+        old1 = tool(obj(city = {**STR, "uniqueItems" : True}))
+        new1 = tool(obj(city = {**STR, "uniqueItems" : False}))
+        found1 = diff_snapshots({"t" : old1},{"t": new1})
+        self.assertEqual(found1 , [])
+
+    def test_prefix_items_changed_is_risky(self):
+        old = tool(obj(tag={"type": "array", "prefixItems": [{"type": "string"}]}))
+        new = tool(obj(tag = {"type": "array", "prefixItems": [{"type": "integer"}]}))
+        found = diff_snapshots({"t": old},{"t": new})
+        self.assertIn("prefix_items_changed",{x.kind for x in found})
+        self.assertEqual(worst(found),RISKY)
+
+        old1 = tool(obj(tag={"type": "array", "prefixItems": [{"type": "string"}]}))
+        new1 = tool(obj(tag = {"type": "array", "prefixItems": [{"type": "string"}]}))
+        found1 = diff_snapshots({"t": old1},{"t": new1})
+        self.assertEqual(found1, [])
 
 
 
