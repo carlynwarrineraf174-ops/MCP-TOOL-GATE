@@ -194,6 +194,14 @@ def _diff_object(old: dict, new: dict, out: list, tool: str, path: str, side: st
             _add(out, tool, f"{path}.{name}", "response_required_removed", BREAKING,
                  f"返回字段 {name} 不再保证存在")
 
+    old_dep = old.get("dependentRequired") or {}
+    new_dep = new.get("dependentRequired") or {}
+    for key in sorted(new_dep):
+        added = set(new_dep[key]) - set(old_dep.get(key) or [])
+        if added:
+            _add(out, tool, f"{path}.dependentRequired.{key}","dependent_required_added",
+                 BREAKING,f"存在{key}时新增必填{sorted(added)}")
+
     if old.get("additionalProperties", True) is not False and new.get("additionalProperties") is False:
         if side == "request":
             _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING,

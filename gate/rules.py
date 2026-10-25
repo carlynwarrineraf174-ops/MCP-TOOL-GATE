@@ -44,6 +44,7 @@ RULES: list[tuple[str, str, str, str, str]] = [
     ("const_changed", "const 值变化 / 新增", "both", BREAKING, "取值被钉死，老调用可能传别的值"),
     ("pattern_changed", "正则 pattern 变化", "request", RISKY, "正则包含关系无法程序化判定 → 转人工 review"),
     ("unsupported_keyword", "未支持的关键字发生变化", "both", RISKY, "静默放过 = 虚假的通过信号；漏报比误报贵"),
+    ("dependent_required_added", "字段间依赖变严", "request", BREAKING, "等于给老调用加了一条隐性必填"),
 ]
 
 

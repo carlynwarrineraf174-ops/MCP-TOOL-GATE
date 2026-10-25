@@ -166,6 +166,34 @@ class DiffTest(unittest.TestCase):
         self.assertEqual(prepare_schema(old["input_schema"])["properties"]["city"], old_inner)
         self.assertIn("type_changed", {x.kind for x in diff_snapshots({"t": old}, {"t": new})})
 
+    # def test_dependent_required_added_is_breaking(self):
+    #     old = tool({"type": "object", "properties": {"card": STR, "addr": STR}})
+    #     new = tool({"type": "object", "properties": {"card": STR, "addr": STR},
+    #                 "dependentRequired": {"card": ["addr"]}})
+    #     found = diff_snapshots({"t": old}, {"t": new})
+    #     self.assertIn("dependent_required_added", {x.kind for x in found})
+    #     self.assertEqual(worst(found), BREAKING)
+    #
+    # def test_dependent_required_removed_is_safe(self):
+    #     old = tool({"type": "object", "properties": {"card": STR, "addr": STR},
+    #                 "dependentRequired": {"card": ["addr"]}})
+    #     new = tool({"type": "object", "properties": {"card": STR, "addr": STR}})
+    #     self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+    def test_dependent_required_added_is_breaking(self):
+        old = tool({"type":"object","properties":{"card": STR, "addr": STR}})
+        new = tool({"type":"object","properties":{"card": STR, "addr": STR}, "dependentRequired":{"card": ["addr"]}})
+
+        found = diff_snapshots({"t": old},{"t": new})
+        self.assertIn("dependent_required_added", {x.kind for x in found})
+        self.assertEqual(worst(found),BREAKING)
+
+    def test_dependent_required_removed_is_safe(self):
+        old = tool({"type": "object", "properties": {"card": STR, "addr": STR}, "dependentRequired":{"card": ["addr"]}})
+        new = tool({"type": "object", "properties": {"card": STR, "addr": STR}})
+        self.assertEqual(diff_snapshots({"t": old},{"t": new}), [])
+
+
+
 
 if __name__ == "__main__":
     unittest.main()
