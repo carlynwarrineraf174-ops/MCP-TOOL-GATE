@@ -1,0 +1,10 @@
+[
+
+  {"id": "c01", "input": "帮我把 3 和 5 加起来", "expected_tool": "add", "expected_args": {"a": 3, "b": 5}},
+  {"id": "c02", "input": "原样返回你好", "expected_tool": "echo", "expected_args": {"text": "你好"}},
+  {"id": "c03", "input": "故意报个错，原因是网络断了", "expected_tool": "boom", "expected_args": {"reason": "网络断了"}}
+
+]
+
+
+

@@ -1,0 +1,119 @@
+{
+  "add": {
+    "description": "Add two integers.",
+    "input_schema": {
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "integer"
+        },
+        "b": {
+          "title": "B",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "title": "addArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "addOutput",
+      "type": "object"
+    }
+  },
+  "boom": {
+    "description": "Always returns an MCP tool error (isError).",
+    "input_schema": {
+      "properties": {
+        "reason": {
+          "default": "fail",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "boomArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "boomOutput",
+      "type": "object"
+    }
+  },
+  "echo": {
+    "description": "Echo text back.",
+    "input_schema": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "echoArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "echoOutput",
+      "type": "object"
+    }
+  },
+  "slow": {
+    "description": "Sleep briefly then return (for latency/throughput smoke).",
+    "input_schema": {
+      "properties": {
+        "ms": {
+          "default": 50,
+          "title": "Ms",
+          "type": "integer"
+        }
+      },
+      "title": "slowArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "slowOutput",
+      "type": "object"
+    }
+  }
+}

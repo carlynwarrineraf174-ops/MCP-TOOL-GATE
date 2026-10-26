@@ -1,0 +1,123 @@
+{
+  "add": {
+    "description": "Add two integers.",
+    "input_schema": {
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "integer"
+        },
+        "b": {
+          "title": "B",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "title": "addArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {},
+      "required": [
+        "result"
+      ],
+      "title": "addOutput",
+      "type": "object"
+    }
+  },
+  "boom": {
+    "description": "Always returns an MCP tool error (isError).",
+    "input_schema": {
+      "properties": {
+        "reason": {
+          "default": "fail",
+          "enum": [
+            "error"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "boomArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "boomOutput",
+      "type": "object"
+    }
+  },
+  "echo": {
+    "description": "回显输入的文本（修改版）。",
+    "input_schema": {
+      "properties": {
+        "repeat": {
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "repeat"
+      ],
+      "title": "echoArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "echoOutput",
+      "type": "object"
+    }
+  },
+  "health_check": {
+    "description": "健康检查。",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "output_schema": null
+  },
+  "slow": {
+    "description": "Sleep briefly then return (for latency/throughput smoke).",
+    "input_schema": {
+      "properties": {},
+      "title": "slowArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "slowOutput",
+      "type": "object"
+    }
+  }
+}

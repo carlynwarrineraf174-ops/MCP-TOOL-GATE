@@ -1,0 +1,33 @@
+name: MCP Tool Gate
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  gate-check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置 Python 环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install mcp langchain-openai
+
+    - name: 1. 跑单元测试 (全绿才能往下走)
+      run: |
+        python -m unittest discover -s tests -t .
+
+    - name: 2. 跑契约门禁 (检查有没有 BREAKING 变更)
+      run: |
+        # 如果退出码是 1，这个 Step 就会变红，PR 就被卡住了
+        python -m gate.check --base snapshots/v1 --head snapshots/v2
