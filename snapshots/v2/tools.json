@@ -1,5 +1,5 @@
 {
-  "cancel_order":  {
+  "cancel_order":    {
     "description": "取消一笔未发货订单。",
     "input_schema": {
       "properties": {
