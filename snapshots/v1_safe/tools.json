@@ -5,7 +5,7 @@
       "properties": {
         "city": {
           "title": "City",
-          "type": "string"
+          "type": "int"
         },
         "unit": {
           "default": "c",
