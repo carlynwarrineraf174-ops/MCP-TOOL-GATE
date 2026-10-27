@@ -1,92 +1,147 @@
-"""gate/eval.py —— 极简版 Agent 评测引擎。
+"""gate/eval.py —— 评测引擎。
 
-跑法：python -m gate.eval --cases cases/tool_selection.json
+跑法：
+    python -m gate.eval --cases cases/tool_selection.json --sut fake --rounds 3
+    python -m gate.eval --cases cases/tool_selection.json --sut real --rounds 3 --snapshot snapshots/real-v1
+
+口径（写进 README，面试必问）：
+    tool_acc  工具选对的比例             = tool_ok / n
+    args_acc  工具选对时参数也对的比例    = args_ok / tool_ok      ← 条件口径，分母不是 n
+    both_acc  一次调用整体正确            = both_ok / n
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import statistics
+import sys
 from pathlib import Path
+from typing import Callable
 
-from .predict import predict
+Predict = Callable[[dict], dict]
 
-from sut.agent import run_real_agent
-from pathlib import Path
+
+def ensure_utf8() -> None:
+    """Windows 控制台默认 GBK，打印 ✅/→ 会 UnicodeEncodeError。入口调一次。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+def score_once(cases: list[dict], predict: Predict) -> dict:
+    """跑一轮：逐题判分，返回计数 + 三个准确率 + 每题明细。"""
+    tool_ok = args_ok = both_ok = 0
+    detail: list[dict] = []
+
+    for case in cases:
+        pred = predict(case) or {}
+        called = pred.get("tool")
+        got_args = pred.get("args") or {}
+        expect_args = case.get("expected_args") or {}
+
+        t_ok = called == case.get("expected_tool")
+        # 参数只在「工具选对」时才有意义：工具都错了，填对参数是运气不是能力
+        a_ok = bool(t_ok and all(got_args.get(k) == v for k, v in expect_args.items()))
+        b_ok = bool(t_ok and a_ok)
+
+        tool_ok += int(bool(t_ok))
+        args_ok += int(a_ok)
+        both_ok += int(b_ok)
+        detail.append({"id": case.get("id"), "expected": case.get("expected_tool"),
+                       "actual": called, "tool_ok": bool(t_ok), "args_ok": a_ok})
+
+    n = len(cases) or 1
+    return {
+        "n": len(cases),
+        "tool_ok": tool_ok,
+        "args_ok": args_ok,
+        "both_ok": both_ok,
+        "tool_acc": tool_ok / n,
+        "args_acc": (args_ok / tool_ok) if tool_ok else 0.0,   # ← 条件分母
+        "both_acc": both_ok / n,
+        "detail": detail,
+    }
+
+
+def summarize(runs: list[dict]) -> dict:
+    """多轮汇总：均值 + [min,max]。单轮的 ±8pp 噪声比要检测的退化还大（lab_05 实测）。"""
+    def agg(key: str) -> dict:
+        vals = [r[key] for r in runs]
+        return {"mean": statistics.mean(vals), "min": min(vals), "max": max(vals)}
+
+    return {"rounds": len(runs), "tool": agg("tool_acc"), "args": agg("args_acc"),
+            "both": agg("both_acc")}
+
+
+def build_predictor(sut: str, snapshot: str, fake_answers: str) -> Predict:
+    if sut == "fake":
+        table = json.loads(Path(fake_answers).read_text(encoding="utf-8"))
+
+        def _fake(case: dict) -> dict:
+            return table.get(case.get("id"), {"tool": "unknown", "args": {}})
+
+        return _fake
+
+    # 只有真模型这条路才 import langchain —— 保证 --sut fake 不需要装任何模型依赖
+    from sut.agent import run_real_agent
+
+    def _real(case: dict) -> dict:
+        return run_real_agent(case["input"], snapshot_dir=snapshot)
+
+    return _real
+
+
+def _fmt(a: dict) -> str:
+    return f"{a['mean']:.2%} [{a['min']:.2%}, {a['max']:.2%}]"
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="gate.eval", description="跑测试用例，算工具和参数的准确率")
-    ap.add_argument("--cases", required=True, help="考卷 JSON 文件的路径")
-    ap.add_argument("--sut", choices=["fake","real"], default="fake", help="用真模型还是假模型")
-    ap.add_argument("--snapshot", default="snapshots/real-v1",help = "使用哪个快照作为工具集")
+    ensure_utf8()
+    ap = argparse.ArgumentParser(prog="gate.eval", description="跑测试用例，算工具/参数准确率")
+    ap.add_argument("--cases", required=True, help="考卷 JSON")
+    ap.add_argument("--sut", choices=["fake", "real"], default="fake")
+    ap.add_argument("--snapshot", default="snapshots/real-v1", help="用哪个快照当工具集")
+    ap.add_argument("--fake-answers", default="cases/fake_answers.json",
+                    help="fake 版答案表（验证评测管线本身，不是模型成绩）")
+    ap.add_argument("--rounds", type=int, default=3, help="轮次（>=3，单轮不可信）")
+    ap.add_argument("--out-dir", default="reports")
     args = ap.parse_args(argv)
 
-    # 1. 读取考卷
     cases = json.loads(Path(args.cases).read_text(encoding="utf-8"))
+    predict = build_predictor(args.sut, args.snapshot, args.fake_answers)
 
-    total = len(cases)
-    tool_correct = 0
-    args_correct = 0
+    print(f"=== 评测：{len(cases)} case × {args.rounds} 轮，sut={args.sut} ===")
+    runs = [score_once(cases, predict) for _ in range(args.rounds)]
+    summary = summarize(runs)
 
-    print(f"=== 开始评测，共 {total} 道题 ===")
+    print(f"  tool_acc  {_fmt(summary['tool'])}   工具选对 / n")
+    print(f"  args_acc  {_fmt(summary['args'])}   参数填对 / 工具选对   ← 条件口径")
+    print(f"  both_acc  {_fmt(summary['both'])}   一次调用整体正确 / n")
 
-    # 2. 逐题考试
-    for c in cases:
-        case_id = c["id"]
-        query = c["input"]
-        expected_tool = c["expected_tool"]
-        expected_args = c.get("expected_args", {})
+    if args.sut == "fake":
+        print("  fake 版只验证评测管线（分数应为 100%），不代表模型能力")
 
-        # 让假模型答题
-        if args.sut == "fake":
-            result = predict(query)
-        else:
-            result = run_real_agent(query, snapshot_dir = args.snapshot)
-        actual_tool = result.get("tool")
-        actual_args = result.get("args", {})
-
-        # 3. 判卷子：工具选对没？
-        tool_ok = (actual_tool == expected_tool)
-        if tool_ok:
-            tool_correct += 1
-
-        # 4. 判卷子：参数填对没？（只有工具选对了，参数才有意义）
-        args_ok = False
-        if tool_ok:
-            # 这里简化一下：只要实际的参数包含期望的参数，就算对（不要求完全一样）
-            args_ok = all(actual_args.get(k) == v for k, v in expected_args.items())
-            if args_ok:
-                args_correct += 1
-
-        # 打印这一题的得分情况
-        status = "✅" if (tool_ok and args_ok) else "❌"
-        print(f"[{status}] {case_id} 提问: {query}")
-        print(f"      期望调用: {expected_tool}")
-        print(f"      实际调用: {actual_tool} (工具{'对' if tool_ok else '错'}, 参数{'对' if args_ok else '错'})")
-
-    # 5. 算总分
-    acc_tool = tool_correct / total
-    acc_args = args_correct / total
-
-    print("\n=== 成绩单 ===")
-    print(f"工具选择准确率 (tool_acc): {acc_tool:.2%}")
-    print(f"参数填写准确率 (args_acc): {acc_args:.2%}")
-
-    # 保存 JSON
-    out_dir = Path("reports")
-    out_dir.mkdir(exist_ok=True)
-    report_file = out_dir / f"eval_{Path(args.snapshot).name}.json"
-    report_data = {
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    report = {
         "sut": args.sut,
         "snapshot": args.snapshot,
-        "total": total,
-        "tool_acc": acc_tool,  # <--- 改这里，存比例
-        "args_acc": acc_args  # <--- 改这里，存比例
+        "cases": str(args.cases),
+        "n": len(cases),
+        "rounds": args.rounds,
+        "tool_acc": round(summary["tool"]["mean"], 4),
+        "args_acc": round(summary["args"]["mean"], 4),
+        "both_acc": round(summary["both"]["mean"], 4),
+        "tool_range": [round(summary["tool"]["min"], 4), round(summary["tool"]["max"], 4)],
+        "args_range": [round(summary["args"]["min"], 4), round(summary["args"]["max"], 4)],
+        "per_case": runs[-1]["detail"],
     }
-
-    report_file.write_text(json.dumps(report_data, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"评测数据已保存至: {report_file}")
+    dest = out / f"eval_{Path(args.snapshot).name}_{args.sut}.json"
+    dest.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  已写入 {dest}")
     return 0
 
 

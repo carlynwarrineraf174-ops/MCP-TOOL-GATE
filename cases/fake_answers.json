@@ -1,0 +1,5 @@
+{
+  "c01": {"tool": "add", "args": {"a": 3, "b": 5}},
+  "c02": {"tool": "echo", "args": {"text": "你好"}},
+  "c03": {"tool": "boom", "args": {"reason": "网络断了"}}
+}

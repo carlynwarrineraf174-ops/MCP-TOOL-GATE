@@ -1,10 +1,26 @@
 [
-
   {"id": "c01", "input": "帮我把 3 和 5 加起来", "expected_tool": "add", "expected_args": {"a": 3, "b": 5}},
   {"id": "c02", "input": "原样返回你好", "expected_tool": "echo", "expected_args": {"text": "你好"}},
-  {"id": "c03", "input": "故意报个错，原因是网络断了", "expected_tool": "boom", "expected_args": {"reason": "网络断了"}}
+  {"id": "c03", "input": "故意报个错，原因是网络断了", "expected_tool": "boom", "expected_args": {"reason": "网络断了"}},
+  {"id": "c04", "input": "麻烦算一下 100 加 200 是多少", "expected_tool": "add", "expected_args": {"a": 100, "b": 200}},
+  {"id": "c05", "input": "请复述这句话：今天天气不错", "expected_tool": "echo", "expected_args": {"text": "今天天气不错"}},
+  {"id": "c06", "input": "模拟一个服务端错误，错误信息写 '数据库超时'", "expected_tool": "boom", "expected_args": {"reason": "数据库超时"}},
+  {"id": "c07", "input": "我要测试一下接口延迟，让它等 500 毫秒", "expected_tool": "slow", "expected_args": {"ms": 500}},
+  {"id": "c08", "input": "算一下 7 加 8", "expected_tool": "add", "expected_args": {"a": 7, "b": 8}},
 
+  {"id": "c09", "input": "帮我算个加法，左边是 15，右边是 25", "expected_tool": "add", "expected_args": {"a": 15, "b": 25}},
+  {"id": "c10", "input": "把文字 'hello world' 原封不动返回给我", "expected_tool": "echo", "expected_args": {"text": "hello world"}},
+  {"id": "c11", "input": "测试一下异常处理，抛个错，理由随便填个 'test'", "expected_tool": "boom", "expected_args": {"reason": "test"}},
+  {"id": "c12", "input": "系统好像卡了，帮我暂停 1000 毫秒看看", "expected_tool": "slow", "expected_args": {"ms": 1000}},
+  {"id": "c13", "input": "求和：33 和 44", "expected_tool": "add", "expected_args": {"a": 33, "b": 44}},
+  {"id": "c14", "input": "跟我重复一遍：'你好呀'", "expected_tool": "echo", "expected_args": {"text": "你好呀"}},
+
+  {"id": "c15", "input": "随便报个错就行", "expected_tool": "boom", "expected_args": {"reason": "error"}},
+  {"id": "c16", "input": "延迟一下", "expected_tool": "slow", "expected_args": {"ms": 50}},
+  {"id": "c17", "input": "1 加 1 等于几", "expected_tool": "add", "expected_args": {"a": 1, "b": 1}},
+  {"id": "c18", "input": "复述：测试文本", "expected_tool": "echo", "expected_args": {"text": "测试文本"}},
+  {"id": "c19", "input": "报错吧，原因写 '超时'", "expected_tool": "boom", "expected_args": {"reason": "超时"}},
+  {"id": "c20", "input": "让程序慢一点，卡 200 毫秒", "expected_tool": "slow", "expected_args": {"ms": 200}}
 ]
-
 
 
