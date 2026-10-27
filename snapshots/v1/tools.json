@@ -64,5 +64,27 @@
       "type": "object"
     },
     "output_schema": null
+  },
+   "get_temperature": {
+    "description": "查询指定城市的气温。",
+    "input_schema": {
+      "properties": {
+        "city": {
+          "title": "Temperature",
+          "type": "string"
+        },
+        "unit": {
+          "default": "c",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "city"
+      ],
+      "title": "get_temperatureArguments",
+      "type": "object"
+    },
+    "output_schema": null
   }
 }
