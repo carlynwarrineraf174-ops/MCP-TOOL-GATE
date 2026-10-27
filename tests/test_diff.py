@@ -272,5 +272,52 @@ class DiffTest(unittest.TestCase):
         found = diff_snapshots({"t":old},{"t":new})
         self.assertEqual(found,[])
 
+    # ---- 语义等价：写法不同、意思相同，不该报警（outputSchema 尤其常见） ----
+    def test_output_allof_single_branch_is_equivalent(self):
+        """输出 schema 外面多包一层 allOf，语义没变 → 不该报"返回字段被删除"。"""
+        inner = {"type": "object", "properties": {"t": {"type": "number"}}}
+        old = tool(obj(city=STR), output_schema=inner)
+        new = tool(obj(city=STR), output_schema={"allOf": [inner]})
+        self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+
+    def test_output_single_element_type_list_is_equivalent(self):
+        old = tool(obj(city=STR),
+                   output_schema={"type": "object", "properties": {"t": {"type": "number"}}})
+        new = tool(obj(city=STR),
+                   output_schema={"type": ["object"], "properties": {"t": {"type": ["number"]}}})
+        self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+
+    def test_output_empty_required_and_open_additional_props_are_equivalent(self):
+        old = tool(obj(city=STR),
+                   output_schema={"type": "object", "properties": {"t": {"type": "number"}}})
+        new = tool(obj(city=STR),
+                   output_schema={"type": "object", "properties": {"t": {"type": "number"}},
+                                  "required": [], "additionalProperties": True})
+        self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+
+    def test_output_pure_metadata_change_is_silent(self):
+        old = tool(obj(city=STR), output_schema={
+            "type": "object", "title": "A", "examples": [1],
+            "properties": {"t": {"type": "number"}}})
+        new = tool(obj(city=STR), output_schema={
+            "type": "object", "title": "B", "examples": [2],
+            "properties": {"t": {"type": "number"}}})
+        self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+
+    def test_single_branch_oneof_is_equivalent(self):
+        old = tool(obj(f={"oneOf": [{"type": "string"}]}))
+        new = tool(obj(f={"type": "string"}))
+        self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+
+    def test_equivalence_must_not_swallow_real_change(self):
+        """负例的负例：归一化不能把真变更也吃掉。"""
+        old = tool(obj(city=STR), output_schema={"type": "object",
+                                                "properties": {"t": {"type": "number"}}})
+        new = tool(obj(city=STR), output_schema={"allOf": [
+            {"type": "object", "properties": {"t": {"type": "string"}}}]})
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("type_changed", {f.kind for f in found})
+
+
 if __name__ == "__main__":
     unittest.main()

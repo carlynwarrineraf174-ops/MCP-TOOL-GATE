@@ -105,11 +105,53 @@ def _normalize(node):
     return out
 
 
+# 纯元数据：写法不同但语义相同，参与比较只会制造假报警
+_EQ_DROP = frozenset({"title", "$comment", "$id", "$schema", "examples"})
+
+
+def _simplify(node):
+    """语义等价归一化：把「写法不同、意思相同」的 schema 收敛成同一种形态。
+
+    只做**无损**变换（变换后语义不变），目的是消除纯误报 —— 对 outputSchema 尤其明显：
+    生成器产出的输出 schema 常有 allOf 包一层、单元素 type 数组、空 required，
+    写法一换就会被判成"返回字段被删除"。
+
+        type: ["string"]                    → type: "string"
+        {"allOf": [X]} / {"oneOf": [X]}     → X                （单分支）
+        required: [] / additionalProperties: true → 删掉        （等价于不写）
+        title / $comment / $id / $schema / examples → 删掉      （纯元数据）
+    """
+    if isinstance(node, list):
+        return [_simplify(x) for x in node]
+    if not isinstance(node, dict):
+        return node
+
+    # 单分支组合子：{"oneOf": [X]} 语义上就是 X
+    for key in _ONE_OF_KEYS:
+        branches = node.get(key)
+        if isinstance(branches, list) and len(branches) == 1 and len(node) == 1:
+            return _simplify(branches[0])
+
+    out = {}
+    for key, value in node.items():
+        if key in _EQ_DROP:
+            continue
+        if key == "type" and isinstance(value, list) and len(value) == 1:
+            out[key] = value[0]
+            continue
+        if key == "required" and value == []:
+            continue
+        if key == "additionalProperties" and value is True:
+            continue
+        out[key] = _simplify(value)
+    return out
+
+
 def prepare_schema(doc: dict | None) -> dict:
-    """快照里的一份 schema → 可比较的形态（先展开 $ref，再归一化顺序）。"""
+    """快照里的一份 schema → 可比较的形态（展开 $ref → 语义归一 → 顺序归一）。"""
     if not doc:
         return {}
-    return _normalize(_resolve(doc, doc))
+    return _normalize(_simplify(_resolve(doc, doc)))
 
 
 # ---------------------------------------------------------------- 比较
