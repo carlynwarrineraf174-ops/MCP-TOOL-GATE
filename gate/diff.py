@@ -53,6 +53,17 @@ def _canon(obj: object) -> str:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
+def _type_set(node: dict) -> set | None:
+    """把 type 归一成集合：`"string"` 和 `["string","null"]` 要能比较。
+
+    None = 这个 schema 没写 type（JSON Schema 语义：接受任意类型）。
+    """
+    t = node.get("type")
+    if t is None:
+        return None
+    return set(t) if isinstance(t, list) else {t}
+
+
 # ---------------------------------------------------------------- 预处理
 
 
@@ -109,11 +120,20 @@ def _add(out: list[Finding], tool: str, path: str, kind: str, sev: str, detail: 
 
 
 def _diff_enum(old: dict, new: dict, out: list, tool: str, path: str, side: str) -> None:
+
     old_enum, new_enum = old.get("enum"), new.get("enum")
-    if not (isinstance(old_enum, list) and isinstance(new_enum, list)):
+    if old_enum is None and new_enum is None:
         return
-    o = {_canon(x) for x in old_enum}
-    n = {_canon(x) for x in new_enum}
+    o = {_canon(x) for x in old_enum} if isinstance(old_enum, list) else None
+    n = {_canon(x) for x in new_enum} if isinstance(new_enum, list) else None
+
+    if o is None and n is not None:  # 原来任意值 → 现在钉死集合 = 收窄
+        if side == "request":
+            _add(out, tool, f"{path}.enum", "enum_added", BREAKING,
+                 f"新增 enum（原来接受任意值），老取值可能非法: {sorted(n)}")
+        return
+    if o is None or n is None:  # 去掉 enum = 放宽，静默
+        return
     if side == "request":
         removed, added = o - n, n - o
         if removed:
@@ -226,10 +246,17 @@ def _diff_unsupported(old: dict, new: dict, out: list, tool: str, path: str) -> 
 def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
     if not isinstance(old, dict) or not isinstance(new, dict):
         return
-
-    if old.get("type") and new.get("type") and old["type"] != new["type"]:
-        _add(out, tool, path, "type_changed", BREAKING,
-             f"类型 {old['type']} → {new['type']}")
+    old_t = _type_set(old)
+    new_t = _type_set(new)
+    if old_t is None and new_t is not None:
+        if side == "request":
+            _add(out, tool, path, "type_restricted", BREAKING,
+                 f"新增类型约束 {sorted(new_t)}（原来接受任意类型）")
+    elif old_t is not None and new_t is not None:
+        dropped = old_t - new_t
+        if dropped:
+            _add(out, tool, path, "type_changed", BREAKING,
+                 f"类型 {sorted(old_t)} → {sorted(new_t)}（去掉 {sorted(dropped)}）")
 
     if old.get("const") != new.get("const") and new.get("const") is not None:
         _add(out, tool, f"{path}.const", "const_changed", BREAKING,
@@ -262,12 +289,14 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
                 _add(out, tool, f"{path}.{key}", "union_changed", RISKY,
                      f"{key} 分支内容变化（顺序不同不算）")
 
-    if isinstance(old.get("items"), dict) and isinstance(new.get("items"), dict):
-        _diff_node(old["items"], new["items"], out, tool, f"{path}[]", side)
+    old_items, new_items = old.get("items"), new.get("items")
+    if isinstance(old_items, dict) and isinstance(new_items, dict):
+        _diff_node(old_items, new_items, out, tool, f"{path}[]", side)
+    elif side == "request" and not isinstance(old_items, dict) and isinstance(new_items, dict):
+        _add(out, tool, f"{path}.items", "items_restricted", BREAKING,
+             "新增数组元素约束（原来任意元素都合法）")
 
-    # if old.get("readOnly") is not True and new.get("readOnly") is True:
-    #     _add(out, tool, f"{path}.readOnly", "readonly_added", BREAKING,
-    #          "入参变更为 readOnly，拒绝外部传入")
+
     if old.get("readOnly") is not True and new.get("readOnly") is True:
         _add(out, tool, f"{path}.readOnly", "readonly_added", BREAKING,
              "入参变更为 readOnly，拒绝外部传入")
@@ -280,10 +309,6 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
         _add(out, tool, f"{path}.prefixItems", "prefix_items_changed", RISKY,
              "数组结构变化，无法程序化确认兼容")
 
-    # print("====== 我进入 _diff_object 啦 ======")
-    # print("旧的 old 是:", old)
-    # print("新的 new 是:", new)
-    # print("当前路径 path 是:", path)
 
     _diff_object(old, new, out, tool, path, side)
     _diff_unsupported(old, new, out, tool, path)

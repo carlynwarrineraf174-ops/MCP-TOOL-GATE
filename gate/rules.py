@@ -49,6 +49,9 @@ RULES: list[tuple[str, str, str, str, str]] = [
     ("readonly_added", "入参新增 readOnly", "request", BREAKING, "字段不再接受外部传入"),
     ("unique_items_changed","uniqueItems变化","both",BREAKING,"原来能传重复值，现在会被拒"),
     ("prefix_items_changed","prefixItems 数量或内容变化","both",RISKY,"数组结构变化，无法程序化确认兼容"),
+    ("enum_added", "原来无 enum、新增 enum", "request", BREAKING, "老调用可传任意值，现在只有枚举内的值合法"),
+    ("type_restricted", "原来无 type、新增 type", "request", BREAKING, "原来接受任意类型，现在只接受指定类型"),
+    ("items_restricted", "原来无 items、新增 items", "request", BREAKING, "原来任意元素合法，现在元素形状被约束"),
 ]
 
 

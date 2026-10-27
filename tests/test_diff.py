@@ -224,8 +224,53 @@ class DiffTest(unittest.TestCase):
         found1 = diff_snapshots({"t": old1},{"t": new1})
         self.assertEqual(found1, [])
 
+    #     # ---- 边界：从「无」到「有」的收紧（漏判高发区） ----
+
+    def test_enum_added_where_none_is_breaking(self):
+        old = tool(obj(reason = STR))
+        new = tool(obj(reason = {"type": "string", "enum": ["error"]}))
+        found = diff_snapshots({"t": old},{"t": new})
+        self.assertIn("enum_added", {x.kind for x in found})
+        self.assertEqual(worst(found), BREAKING)
 
 
+
+    def test_enum_added_where_none_is_breaking(self):
+        old = tool(obj(city = {"description" : "城市"}))
+        new = tool(obj(city = {"description" : "城市", "type" : "string"}))
+        found = diff_snapshots({"t": old},{"t": new})
+        self.assertIn("type_restricted",{x.kind for x in found})
+        self.assertEqual(worst(found), BREAKING)
+
+    def test_items_added_is_breaking(self):
+        old = tool(obj(tag = {"type": "array"}))
+        new = tool(obj(tag = {"type" : "array", "items" : {"type": "string"}}))
+        found = diff_snapshots({"t": old},{"t":new})
+        self.assertIn("items_restricted",{x.kind for x in found})
+        self.assertEqual(worst(found),BREAKING)
+    #     # ---- 边界：nullable 是「放宽」，不该报警（负例，之前是误报） ----
+
+    def test_type_nullable_added_is_siilent(self):
+        old = tool(obj(city = {"type" : "string"}))
+        new = tool(obj(city = {"type": ["string", "null"]}))
+        found = diff_snapshots({"t": old},{"t": new})
+        self.assertEqual(found, [])
+
+
+
+    def test_type_nullable_removed_is_breaking(self):
+        old = tool(obj(city = {"type" : ["string","null" ]}))
+        new = tool(obj(city = {"type" : "string"}))
+        found = diff_snapshots({"t": old},{"t":new})
+        self.assertEqual(worst(found),BREAKING)
+
+
+
+    def test_enum_removed_is_silent(self):
+        old = tool(obj(reason = {"type": "string", "enum": ["a"]}))
+        new = tool(obj(reason = {"type": "string"}))
+        found = diff_snapshots({"t":old},{"t":new})
+        self.assertEqual(found,[])
 
 if __name__ == "__main__":
     unittest.main()
