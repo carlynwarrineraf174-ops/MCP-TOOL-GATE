@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ "main", "master" ]
 
+# 👇 加上下面这两行，赋予机器人写评论的权限
+permissions:
+  pull-requests: write
+  issues: write
+
 jobs:
   gate-check:
     runs-on: ubuntu-latest
@@ -29,5 +34,12 @@ jobs:
 
     - name: 2. 跑契约门禁 (检查有没有 BREAKING 变更)
       run: |
-        # 如果退出码是 1，这个 Step 就会变红，PR 就被卡住了
-        python -m gate.check --base snapshots/v1 --head snapshots/v2
+        python -m gate.check --base snapshots/v1_clean --head snapshots/v1_safe
+
+    - name: Comment on PR
+      if: failure()
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: MCP Tool Gate
+        recreate: true
+        path: reports/report.md
