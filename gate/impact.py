@@ -37,33 +37,45 @@ def main() -> int:
     head_per_case = {c["id"]: c for c in head["per_case"]}
 
     broken_cases = []
+    broken_tools = set()
+
     for cid, h_case in head_per_case.items():
         b_case = base_per_case.get(cid)
         if b_case and b_case["tool_ok"] and b_case["args_ok"]: # 以前是对的
             if not h_case["tool_ok"] or not h_case["args_ok"]: # 现在错了
                 broken_cases.append(cid)
+                broken_tools.add(b_case["expected"])
+
+    # 读取 report.json 获取具体变更原因
+    report_file = Path("reports/report.json")
+    change_reasons = []
+    if report_file.exists():
+        report = json.loads(report_file.read_text(encoding="utf-8"))
+        for f in report.get("findings", []):
+            if f["tool"] in broken_tools:
+                change_reasons.append(f"{f['tool']}.{f['kind']} ({f['severity']})")
 
     print("=== 影响面归因报告 ===")
     print(f"基准版本: {args.base} | 对比版本: {args.head}")
     print(f"工具选择准确率: {base_tool:.2%} -> {head_tool:.2%} (Δ {delta_tool:+.2f} pp)")
     print(f"参数填写准确率: {base_args:.2%} -> {head_args:.2%} (Δ {delta_args:+.2f} pp)")
     print(f"⚠️ 受影响的具体用例: {', '.join(broken_cases) if broken_cases else '无'}")
+    print(f"🔍 对应变更原因: {' · '.join(change_reasons) if change_reasons else '无'}")
 
-    # 追加写入到人类可读的 report.md
-    md_file = Path("reports/report.md")
-    if md_file.exists():
-        impact_section = f"""
-## 影响面归因（由 LLM 评测得出）
+    # 覆盖写入到 impact.md（不追加，保持文件清爽）
+    md_file = Path("reports/impact.md")
+    md_file.parent.mkdir(parents=True, exist_ok=True)
+    impact_section = f"""# 影响面归因报告
 
 - 基准版本：`{args.base}`
 - 变更版本：`{args.head}`
 - **工具选择准确率变化**：{base_tool:.2%} → {head_tool:.2%} （**Δ {delta_tool:+.2f} pp**）
 - **参数填写准确率变化**：{base_args:.2%} → {head_args:.2%} （**Δ {delta_args:+.2f} pp**）
 - **受损用例清单**：{', '.join(broken_cases) if broken_cases else '无'}
+- **对应变更原因**：{' · '.join(change_reasons) if change_reasons else '无'}
 """
-        with open(md_file, "a", encoding="utf-8") as f:
-            f.write(impact_section)
-        print(f"影响面数据已追加至: {md_file}")
+    md_file.write_text(impact_section, encoding="utf-8")
+    print(f"影响面数据已写入: {md_file}")
 
     return 0
 
