@@ -9,7 +9,7 @@
 
 ---
 
-## 现在能做什么（M0 + M1 已完成）
+## 现在能做什么（M0 / M1 已完成，M3 评测已跑通）
 
 ```powershell
 # 1. 抓快照
@@ -46,7 +46,7 @@ worst=BREAKING  BREAKING=2  RISKY=1  SAFE=1
 | **RISKY** | 不坏代码，但改变行为或模型选择 | oasdiff `WARN` |
 | **SAFE** | 向后兼容 | oasdiff `INFO` |
 
-完整规则表（20 条，含每条的理由）见 `gate/rules.py`，跑一次会附在 `report.md` 末尾。
+完整规则表（31 条，含每条的理由）见 `gate/rules.py`，跑一次会附在 `report.md` 末尾。
 
 ## 三条设计判断（面试会追问）
 
@@ -56,6 +56,25 @@ worst=BREAKING  BREAKING=2  RISKY=1  SAFE=1
 
 第四条更细：**`default` 不是兼容性保证**。加 `required` 即使带 `default` 也判 BREAKING —— `default` 是服务端兜底，不是契约。
 
+第五条是最近修的一个真漏判：**JSON Schema 里"没写 `enum` / `type` / `items`"等于"不限"**，所以"从无到有"恰恰是收紧。第一版只比了"两边都存在"的键，导致真实靶场注入 6 处破坏只检出 5 处（`boom.reason` 新增 enum 被静默放过）。修完是 6/6。
+
+## 评测（三个分数，不是一个）
+
+```powershell
+python -m gate.eval --cases cases/tool_selection.json --sut fake --rounds 3     # 管线自检：应恒为 100%
+python -m gate.eval --cases cases/tool_selection.json --sut real --rounds 3 --snapshot snapshots/real-v1
+```
+
+| 指标 | 定义 | 什么时候看它 |
+|---|---|---|
+| `tool_acc` | 工具选对 / n | 选错工具 = 没理解意图 → 去改工具 description |
+| `args_acc` | 参数填对 / **工具选对**（条件口径） | 分母不是 n：工具都选错时"参数恰好对"是运气，不该算能力 |
+| `both_acc` | 一次调用整体正确 / n | 端到端可用率，报给业务方看的那个数 |
+
+20 个 case × 3 轮，报 `mean [min, max]`。**单轮的噪声约 ±8pp，比要检测的退化还大**（`_labs/lab_05` 实测），所以不看单轮数字。
+
+`--sut fake` 读 `cases/fake_answers.json`，只用来验证**评测管线本身**（应恒为 100%），不代表模型能力；它一跌破 100%，说明坏的是管线而不是模型。
+
 ## 为什么门禁本身不用 LLM（LangChain / LangGraph 用在哪）
 
 **分层，不是不会用**：
@@ -63,7 +82,7 @@ worst=BREAKING  BREAKING=2  RISKY=1  SAFE=1
 | 层 | 用什么 | 为什么 |
 |---|---|---|
 | **判定层**（本仓库 `gate/`） | 纯确定性代码，**零依赖网络** | 跑在 CI 里，同一个 commit 必须每次结论一致；用 LLM 判"破不破坏"会出现两次跑出两个结果，这种门禁没人敢用 |
-| **被测对象**（M3 `sut/agent.py`） | **LangGraph + LangChain（`langchain-mcp-adapters`）** | 评测要量的是"真 Agent 在真 schema 下选对工具的概率"，假模型算出来的是噪声 |
+| **被测对象**（M3 `sut/agent.py`） | **LangGraph：手搭的 `StateGraph`（agent → 条件边 → `ToolNode` → 回 agent）** | 评测要量的是"真 Agent 在真 schema 下选对工具的概率"。图自己搭、工具从快照灌进来（不连真 server），兼顾**可复现**与"能讲清 Agent 循环" |
 | **语义路由**（M6 `govern/router.py`） | 工具描述 embedding / 可选 LC 组件 | 20+ 工具时上下文膨胀，要靠召回降 token |
 
 所以 LangChain/LangGraph 在这个项目里是**被测对象与路由**，不是判定引擎。**把 LLM 塞进 diff 是负分**——面试官会问"你为什么要用框架做字符串比较"。
@@ -83,33 +102,39 @@ worst=BREAKING  BREAKING=2  RISKY=1  SAFE=1
 mcp-tool-gate/
 ├─ examples/demo_server.py    # 3 个工具的假 MCP Server（30 行，随时可重写）
 ├─ examples/break_it.py       # 把 v1 改坏成 v2（"改坏实验"产品化）
+├─ examples/break_real.py     # 在真实 MCP Server 的快照上注入 6 处破坏（靶场）
 ├─ gate/snapshot.py           # 连上去取 tools/list，落盘 + sha256
 ├─ gate/diff.py               # 心脏：$ref 展开 / oneOf 归一化 / 请求响应分向
-├─ gate/rules.py              # 20 条规则表（纯数据，每条形如"为什么这么判"）
+├─ gate/rules.py              # 31 条规则表（纯数据，每条形如"为什么这么判"）
 ├─ gate/check.py              # CLI：报告 + 退出码
-├─ tests/                     # 21 个用例（含 5 个"不该报警"的负例）
-└─ snapshots/v1, v2/          # 基线快照（提交进 git，CI 才有得比）
+├─ gate/eval.py               # 评测：tool_acc / args_acc(条件) / both_acc + 多轮区间
+├─ gate/impact.py             # 漂移 → 受影响 case 清单 + 准确率 Δ
+├─ sut/agent.py               # 被测对象：手搭的 LangGraph 图（StateGraph + ToolNode）
+├─ cases/tool_selection.json  # 20 条 case；fake_answers.json = 管线自检基线
+├─ tests/                     # 42 个用例（含 8 个"不该报警"的负例）
+└─ snapshots/                 # v1/v2（假靶场）、real-v1/real-v2（真实靶场），提交进 git
 ```
 
 ## 测试
 
 ```powershell
-python -m unittest discover -s tests -t .     # 21 passed
+python -m unittest discover -s tests -t .     # 42 passed
 # 或装 pytest 后： pytest -q
 ```
 
-**负例比正例重要**：`oneOf` 换序、范围放宽、描述相同、快照未变——这些都必须"不报警"。
+**负例比正例重要**：`oneOf` 换序、范围放宽、`title` 改名、快照未变、`nullable` 放宽、去掉 `enum`——这些都必须"不报警"。
 
 ## 下一步（按顺序）
 
-- [ ] 规则表补到 20 条（`not`/`pattern`/`const`/`prefixItems`）
-- [ ] `gate/eval.py`：20 个 case × 3 轮 → `tool_acc` / `args_acc` **分开报**
-- [ ] 漂移 → 自动重跑评测 → 输出影响面（**这是差异化，别人不做**）
-- [ ] GitHub Actions：pytest + 门禁 + 把 report 塞进 PR 评论
+- [x] 规则表 31 条（含"从无到有"的 `enum` / `type` / `items` 收紧，以及 `const` / `pattern` / `dependentRequired` / `readOnly`）
+- [x] `gate/eval.py`：20 个 case × 3 轮 → `tool_acc` / `args_acc`（条件口径）/ `both_acc` 分开报
+- [ ] 漂移 → 受影响 case **链到具体的 finding**（现在 `impact.py` 只报 Δ 和 case 清单，说不出是哪条变更导致的）
+- [ ] GitHub Actions：把 `report.md` 贴进 PR 评论（workflow 已能跑 pytest + 门禁）
 - [ ] 治理层（可选）：FastAPI 代理 + Redis 令牌桶 + 审计落库 + Prometheus p95
 
 ## 已知限制（写在这里，面试被问就直说）
 
 - 目前只比 `input_schema` / `output_schema`，不比 examples 与 annotations
 - 没有做"语义等价"判断（如 `string` + `format: date` 与自定义类型）
+- 评测的 20 条 case 只覆盖 4 个工具，缺"近义工具干扰"那一类（规划里是 6 条）→ `tool_acc` 的上限被抬高
 - 单机单进程，没有并发场景；性能数据要等治理层

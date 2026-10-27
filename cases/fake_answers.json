@@ -1,5 +1,22 @@
 {
   "c01": {"tool": "add", "args": {"a": 3, "b": 5}},
   "c02": {"tool": "echo", "args": {"text": "你好"}},
-  "c03": {"tool": "boom", "args": {"reason": "网络断了"}}
+  "c03": {"tool": "boom", "args": {"reason": "网络断了"}},
+  "c04": {"tool": "add", "args": {"a": 100, "b": 200}},
+  "c05": {"tool": "echo", "args": {"text": "今天天气不错"}},
+  "c06": {"tool": "boom", "args": {"reason": "数据库超时"}},
+  "c07": {"tool": "slow", "args": {"ms": 500}},
+  "c08": {"tool": "add", "args": {"a": 7, "b": 8}},
+  "c09": {"tool": "add", "args": {"a": 15, "b": 25}},
+  "c10": {"tool": "echo", "args": {"text": "hello world"}},
+  "c11": {"tool": "boom", "args": {"reason": "test"}},
+  "c12": {"tool": "slow", "args": {"ms": 1000}},
+  "c13": {"tool": "add", "args": {"a": 33, "b": 44}},
+  "c14": {"tool": "echo", "args": {"text": "你好呀"}},
+  "c15": {"tool": "boom", "args": {"reason": "error"}},
+  "c16": {"tool": "slow", "args": {"ms": 50}},
+  "c17": {"tool": "add", "args": {"a": 1, "b": 1}},
+  "c18": {"tool": "echo", "args": {"text": "测试文本"}},
+  "c19": {"tool": "boom", "args": {"reason": "超时"}},
+  "c20": {"tool": "slow", "args": {"ms": 200}}
 }
