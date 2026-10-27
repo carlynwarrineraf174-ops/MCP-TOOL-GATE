@@ -20,7 +20,16 @@
   {"id": "c17", "input": "1 加 1 等于几", "expected_tool": "add", "expected_args": {"a": 1, "b": 1}},
   {"id": "c18", "input": "复述：测试文本", "expected_tool": "echo", "expected_args": {"text": "测试文本"}},
   {"id": "c19", "input": "报错吧，原因写 '超时'", "expected_tool": "boom", "expected_args": {"reason": "超时"}},
-  {"id": "c20", "input": "让程序慢一点，卡 200 毫秒", "expected_tool": "slow", "expected_args": {"ms": 200}}
+  {"id": "c20", "input": "让程序慢一点，卡 200 毫秒", "expected_tool": "slow", "expected_args": {"ms": 200}},
+
+  {"id": "c21", "input": "把数字 42 原样回显，别计算", "expected_tool": "echo", "expected_args": {"text": "42"}},
+  {"id": "c22", "input": "把 12 和 8 相加，只告诉我结果", "expected_tool": "add", "expected_args": {"a": 12, "b": 8}},
+  {"id": "c23", "input": "模拟一次超时错误，等 300 毫秒之后再报错", "expected_tool": "boom", "expected_args": {"reason": "超时"}},
+  {"id": "c24", "input": "让请求延迟 100 毫秒，不要报错", "expected_tool": "slow", "expected_args": {"ms": 100}},
+  {"id": "c25", "input": "复述这两个字母：ok", "expected_tool": "echo", "expected_args": {"text": "ok"}},
+  {"id": "c26", "input": "把刚才的失败信息原样抛出来，原因写 '回显失败'", "expected_tool": "boom", "expected_args": {"reason": "回显失败"}},
+  {"id": "c27", "input": "9 加 0 等于多少，慢慢算", "expected_tool": "add", "expected_args": {"a": 9, "b": 0}},
+  {"id": "c28", "input": "卡 250 毫秒，不用抛错", "expected_tool": "slow", "expected_args": {"ms": 250}},
+  {"id": "c29", "input": "重复这句话，不要停顿：今天周三", "expected_tool": "echo", "expected_args": {"text": "今天周三"}},
+  {"id": "c30", "input": "直接抛个错，原因写 '别真等'", "expected_tool": "boom", "expected_args": {"reason": "别真等"}}
 ]
-
-

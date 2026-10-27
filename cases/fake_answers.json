@@ -18,5 +18,15 @@
   "c17": {"tool": "add", "args": {"a": 1, "b": 1}},
   "c18": {"tool": "echo", "args": {"text": "测试文本"}},
   "c19": {"tool": "boom", "args": {"reason": "超时"}},
-  "c20": {"tool": "slow", "args": {"ms": 200}}
+  "c20": {"tool": "slow", "args": {"ms": 200}},
+  "c21": {"tool": "echo", "args": {"text": "42"}},
+  "c22": {"tool": "add", "args": {"a": 12, "b": 8}},
+  "c23": {"tool": "boom", "args": {"reason": "超时"}},
+  "c24": {"tool": "slow", "args": {"ms": 100}},
+  "c25": {"tool": "echo", "args": {"text": "ok"}},
+  "c26": {"tool": "boom", "args": {"reason": "回显失败"}},
+  "c27": {"tool": "add", "args": {"a": 9, "b": 0}},
+  "c28": {"tool": "slow", "args": {"ms": 250}},
+  "c29": {"tool": "echo", "args": {"text": "今天周三"}},
+  "c30": {"tool": "boom", "args": {"reason": "别真等"}}
 }
