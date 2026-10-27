@@ -1,7 +1,7 @@
 # 🛡️ MCP Tool Gate · AI 工具契约质量门禁
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-42%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-53%20passed-brightgreen)
 ![Rules](https://img.shields.io/badge/rules-31-blue)
 ![CI](https://img.shields.io/badge/CI-gate%20enforced-orange)
 
@@ -55,15 +55,18 @@ MCP 工具就是 Agent 的"接口"。但接口改坏了，**强类型客户端�
 
 ```text
 === 影响面归因报告 ===
-基准版本: snapshots/real-v1 | 对比版本: snapshots/real-v2
-工具选择准确率: 98.33% -> 98.33% (Δ +0.00 pp)
-参数填写准确率: 89.82% -> 76.32% (Δ -13.50 pp)
-
-⚠️ 受影响的具体用例: c07, c12, c20
-🔍 对应变更原因: slow.prop_removed (BREAKING)
+基准版本: real-v1 | 对比版本: real-v2
+工具选择准确率: 95.00% -> 98.33% (Δ +3.33 pp)
+参数填写准确率: 89.45% -> 76.32% (Δ -13.13 pp)
+受影响的具体用例: c07, c12, c20
+对应变更原因: slow.prop_removed (BREAKING)
 ```
 
-一句话读法：**删掉 `slow.ms` 这一个参数，参数准确率掉 13.5 个点，3 条用例从对变错** —— 而且其中 1 条是直接**选错了工具**（`slow` → `health_check`）：`ms` 没了，模型就重新理解了 `slow` 的用途。
+一句话读法：**删掉 `slow.ms` 这一个参数，参数准确率掉 13 个点，3 条用例从对变错** —— 其中 1 条是直接**选错了工具**（`slow` → `health_check`）：`ms` 没了，模型就重新理解了 `slow` 的用途。
+
+> 注意 `tool_acc` 反而 **+3.33pp** —— 这是 3 轮采样的抖动，不是提升。**这正是"只看总分会被骗"的证据**，也是为什么三个分数要分开报。
+>
+> ⚠️ 这组数字来自 **20 条 case 的基线**；case 集已扩到 **30 条**（新增 10 条歧义用例），重跑一次 `gate.eval` + `gate.impact` 即可刷新。
 
 ## ⚡ 快速开始
 
@@ -107,7 +110,7 @@ python -m gate.impact --base snapshots/real-v1 --head snapshots/real-v2
 | `args_acc` | 参数填对 / **工具选对**（条件口径） | 分母不是 n：工具都选错时"参数恰好对"是运气 |
 | `both_acc` | 一次调用整体正确 / n | 端到端可用率 |
 
-20 条 case × **3 轮**，报 `mean [min, max]`：**单轮噪声约 ±8pp，比要检测的退化还大**，所以不看单轮数字。
+每条 case × **3 轮**（当前 30 条：20 条基础 + 10 条"一句话同时沾两个工具"的歧义用例），报 `mean [min, max]`：**单轮噪声约 ±8pp，比要检测的退化还大**，所以不看单轮数字。
 `--sut fake` 只做管线自检；`--sut real` 才是真分数（LangGraph SUT，代码在 `sut/agent.py`）。
 
 ## 🧩 架构
@@ -138,20 +141,20 @@ mcp-tool-gate/
 ├─ gate/eval.py           # 评测：三分数 + 多轮区间（条件口径）
 ├─ gate/impact.py         # 漂移 → 受损 case → 对应 finding
 ├─ sut/agent.py           # 被测对象：手搭的 LangGraph 图（StateGraph + ToolNode）
-├─ cases/                 # 20 条 case + fake 答案表（管线自检基线）
+├─ cases/                 # 30 条 case（20 基础 + 10 歧义）+ fake 答案表（管线自检基线）
 ├─ examples/              # demo server / 改坏脚本 / 真实靶场注入
 ├─ snapshots/             # v1·v2（假靶场）、real-v1·real-v2（真实靶场）
-├─ tests/                 # 42 个用例，负例优先
+├─ tests/                 # 53 个用例，负例优先
 └─ docs/                  # 实施手册、修复手册、CI 截图
 ```
 
 ## 🧪 测试
 
 ```powershell
-python -m unittest discover -s tests -t .     # 42 passed
+python -m unittest discover -s tests -t .     # 53 passed
 ```
 
-**负例比正例重要**：`oneOf` 换序、范围放宽、`title` 改名、快照未变、`nullable` 放宽、去掉 `enum` —— 这些都必须"不报警"。门禁误报一次，团队就会把它关掉。
+**负例比正例重要**：`oneOf` 换序、范围放宽、`title` 改名、快照未变、`nullable` 放宽、去掉 `enum`、输出 schema 换个等价写法（`allOf` 包一层 / 单元素 `type` 数组）—— 这些都必须"不报警"。门禁误报一次，团队就会把它关掉。
 
 ## 🔁 接入你自己的仓库
 
@@ -166,18 +169,20 @@ python -m unittest discover -s tests -t .     # 42 passed
 
 ## ⚠️ 已知限制与取舍（被问到就直说）
 
-- `per_case` 存的是**最后一轮**明细，而分数是 3 轮均值 —— 两个口径不同，case 级结论要按"多轮都坏才算受损"重算
-- `impact.py` 不校验 `report.json` 与本次 eval 是否同一对版本，混跑会把原因安错
-- 评测 20 条 case 只覆盖 4 个工具，缺"近义工具干扰"那一类 → `tool_acc` 的上限被抬高
-- 只比 `input_schema` / `output_schema`，不比 examples / annotations，也不做语义等价（`format: date` vs 自定义类型）
+- 评测 30 条 case 里已有 10 条歧义用例，但**工具池仍只有 4 个**（add/echo/boom/slow）→ 工具选择难度仍低于真实场景（20+ 工具、描述高度相似）
+- 语义等价只做到"**写法级**"：`allOf` 包一层、单元素 `type` 数组、空 `required`、元数据变化都不会误报；但 **`format` 的等价**（`date` vs `date-time`）和自定义类型仍转人工 review
+- 分数会抖：`--rounds 3` 只能把标准误压到约一半，**±5pp 以内的差异不要当成提升或退化**
+- 只比 `input_schema` / `output_schema`，不比 examples / annotations
 - **没有做治理层**（代理 / 限流 / 审计 / 指标）：FastMCP 4 已内置 Proxy / Middleware / Auth，重写一遍是**负分**；限流与压测我放在另一个「单体高并发」项目里做
 
 ## 🗺️ 下一步
 
-- [ ] `per_case` 改成多轮聚合率（口径统一）
-- [ ] `impact.py` 加版本一致性断言
-- [ ] case 补到 30 条，加入"近义工具干扰"
-- [ ] 支持 `outputSchema` 的语义等价判定
+- [x] `per_case` 改成多轮聚合率（口径统一，`impact.py` 按"以前每轮全对 → 现在有错"判定）
+- [x] `impact.py` 加版本一致性校验（`report.json` 与本次 eval 不是同一对 → 报警并跳过归因）
+- [x] case 补到 30 条，加入 10 条"一句话同时沾两个工具"的歧义用例
+- [x] `outputSchema` 的**写法级**语义等价归一化（`allOf` / 单元素 type / 空 required / 纯元数据）
+- [ ] 用 30 条 case 重跑一次真实评测，刷新上面的数字
+- [ ] `format` 与自定义类型的语义等价（需要领域知识，暂留人工）
 
 ## 🙏 参考与致谢
 
