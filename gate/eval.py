@@ -124,6 +124,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.sut == "fake":
         print("  fake 版只验证评测管线（分数应为 100%），不代表模型能力")
 
+        # 聚合多轮的 per_case 结果
+    per_case_aggregated = []
+    for case in cases:
+        cid = case.get("id")
+        # 从每一轮里提取这个 case 的结果
+        hits = [d for r in runs for d in r["detail"] if d["id"] == cid]
+
+        # 计算这个 case 在 N 轮里的通过率
+        tool_rate = sum(h["tool_ok"] for h in hits) / len(hits)
+        args_rate = sum(h["args_ok"] for h in hits) / len(hits)
+
+        per_case_aggregated.append({
+            "id": cid,
+            "expected": case.get("expected_tool"),
+            "tool_ok_rate": round(tool_rate, 4),
+            "args_ok_rate": round(args_rate, 4)
+        })
+
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     report = {
@@ -137,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         "both_acc": round(summary["both"]["mean"], 4),
         "tool_range": [round(summary["tool"]["min"], 4), round(summary["tool"]["max"], 4)],
         "args_range": [round(summary["args"]["min"], 4), round(summary["args"]["max"], 4)],
-        "per_case": runs[-1]["detail"],
+        "per_case": per_case_aggregated,  # ← 这是修改后的聚合数据
     }
     dest = out / f"eval_{Path(args.snapshot).name}_{args.sut}.json"
     dest.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

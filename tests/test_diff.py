@@ -235,7 +235,7 @@ class DiffTest(unittest.TestCase):
 
 
 
-    def test_enum_added_where_none_is_breaking(self):
+    def test_type_added_where_none_is_breaking(self):
         old = tool(obj(city = {"description" : "城市"}))
         new = tool(obj(city = {"description" : "城市", "type" : "string"}))
         found = diff_snapshots({"t": old},{"t": new})
@@ -250,7 +250,7 @@ class DiffTest(unittest.TestCase):
         self.assertEqual(worst(found),BREAKING)
     #     # ---- 边界：nullable 是「放宽」，不该报警（负例，之前是误报） ----
 
-    def test_type_nullable_added_is_siilent(self):
+    def test_type_nullable_added_is_silent(self):
         old = tool(obj(city = {"type" : "string"}))
         new = tool(obj(city = {"type": ["string", "null"]}))
         found = diff_snapshots({"t": old},{"t": new})

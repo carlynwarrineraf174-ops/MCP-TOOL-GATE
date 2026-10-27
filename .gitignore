@@ -18,6 +18,8 @@ snapshots/tmp/
 # ---- 本地环境 ----
 .env
 .env.*
+# 模板要提交（里面只有占位符，没有真 key）
+!.env.example
 .idea/
 
 
