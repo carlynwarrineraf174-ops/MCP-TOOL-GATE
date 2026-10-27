@@ -1,5 +1,5 @@
 {
-  "add": {
+  "add":  {
     "description": "Add two integers.",
     "input_schema": {
       "properties": {
