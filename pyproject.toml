@@ -1,10 +1,15 @@
 [project]
 name = "mcp-tool-gate"
 version = "0.1.0"
-description = "MCP 工具的契约变更门禁：schema 快照 + 语义 diff + 严重度分级 + CI 卡点"
+description = "AI 工具契约质量门禁：schema 快照 + 语义 diff + 严重度分级 + CI 卡点"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0,<2",
+    "langchain-core",
+    "langchain-openai",
+    "langgraph",
+    "python-dotenv",
+    "pydantic"
 ]
 
 [project.optional-dependencies]
