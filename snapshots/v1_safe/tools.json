@@ -1,5 +1,5 @@
 {
-  "get_weather": {
+  "get_weather":  {
     "description": "查询特定城市的天气。",
     "input_schema": {
       "properties": {
