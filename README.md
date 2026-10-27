@@ -27,6 +27,8 @@
 ## 🚦 CI 卡点：测试红 ≠ 门禁红
 
 ![gate-check 在 GitHub Actions 里被门禁卡住](docs/images/ci-gate-failed.png)
+   ![gate-check 在 GitHub Actions 里成功修改](docs/images/ci-gate-success.png)
+![gate-check 在 GitHub Actions 里修改参数，门禁卡住](docs/images/ci-gate-failed1.png)
 
 这次 `gate-check` 里**前 5 步全绿**（设环境 / 装依赖 15s / **42 个单测全过**），只有第 6 步「跑契约门禁」是红的：`Process completed with exit code 1`。
 
