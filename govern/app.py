@@ -2,6 +2,8 @@ import logging
 from contextlib import asynccontextmanager, AsyncExitStack
 import inspect
 from pydantic import create_model
+from govern.ratelimit import RateLimiter
+from mcp.server.fastmcp.exceptions import ToolError
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -9,6 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from govern.settings import settings
 
+limiter = RateLimiter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("govern.proxy")
 
@@ -35,13 +38,21 @@ async def lifespan(mcp_app: FastMCP):
         # 关键实现点 1：重新包装成本地函数，但我们必须骗过 FastMCP 的类型解析
         def create_proxy(t_name, t_desc, t_schema):
             async def proxy_func(**kwargs):
-                logger.info(f"🛡️ 代理拦截调用: {t_name} | 入参: {kwargs}")
-                # 关键实现点 2：必须转发给上游并保留 isError
+                # ⚠️ 新增：限流拦截
+                tenant_id = "default_tenant"  # 真实业务可以从前端传参或 context 获取
+
+                # 检查是否被限流
+                allowed = await limiter.is_allowed(tenant_id, t_name)
+                if not allowed:
+                    logger.warning(f"🛑 拦截！限流生效: {tenant_id} -> {t_name}")
+                    # P1 目标：返回 JSON-RPC error
+                    raise ToolError("Rate limit exceeded. Please retry later.")
+
+                logger.info(f"✅ 放行: {t_name} | 入参: {kwargs}")
                 result = await upstream_session.call_tool(t_name, kwargs)
                 if getattr(result, "isError", False):
                     raise ToolError(str(result.content))
                 return result.content
-
             # 动态生成一个假的 Pydantic 模型，强行把原版 Schema 塞给 FastMCP
             props = t_schema.get("properties", {})
             required = t_schema.get("required", [])
