@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     ratelimit_interval: int = 1000  # 多少毫秒补充一次（1000ms = 1秒补1个）
 
     # 新增：SQLite 异步数据库配置
-    db_url: str = "sqlite+aiosqlite:///./govern.db"
+    db_url: str = "sqlite+aiosqlite:///./govern_v2.db"
 
     class Config:
         env_prefix = "GOVERN_"
