@@ -22,6 +22,7 @@ snapshots/tmp/
 !.env.example
 .idea/
 *.txt
+docs/*.md
 
 
 # 忽略 Python 缓存
