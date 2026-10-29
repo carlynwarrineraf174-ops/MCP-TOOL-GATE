@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     upstream_args: list[str] = ["examples/demo_server.py"]
 
     redis_url: str = "redis://localhost:6379/0"
-    ratelimit_enabled: bool = True
+    ratelimit_enabled: bool = False
     ratelimit_fail_mode: str = "open"
     ratelimit_burst: int = 5
     ratelimit_rate: int = 1

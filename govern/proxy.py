@@ -6,6 +6,8 @@ import os
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT_DIR)
 sys.path.insert(0, ROOT_DIR)
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 
 from govern.app import proxy_mcp
 from prometheus_client import start_http_server

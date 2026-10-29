@@ -7,6 +7,7 @@ from sqlalchemy import String, Integer, DateTime, Text, Index
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from govern.settings import settings
+import sys
 
 
 db_lock = asyncio.Lock() # 全局异步锁
@@ -87,7 +88,7 @@ async def _async_record(tenant: str, tool: str, arguments: dict, status: str, du
                 )
                 session.add(audit)
                 await session.commit()
-                print(f" [写库成功] {status}") # 强烈建议加上这句看结果
+                print(f"[DB OK] {status}", file=sys.stderr)  # 强烈建议加上这句看结果
         except Exception as e:
             logger.error(f" 审计落库失败: {e}")
 
