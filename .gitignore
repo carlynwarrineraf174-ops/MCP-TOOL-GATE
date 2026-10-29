@@ -21,7 +21,7 @@ snapshots/tmp/
 # 模板要提交（里面只有占位符，没有真 key）
 !.env.example
 .idea/
-.txt
+*.txt
 
 
 # 忽略 Python 缓存
