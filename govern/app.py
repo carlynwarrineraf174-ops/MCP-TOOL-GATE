@@ -11,6 +11,12 @@ from mcp.client.stdio import stdio_client
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from govern.settings import settings
+from govern.metrics import (
+    TOOL_CALLS_TOTAL,
+    TOOL_DURATION_SECONDS,
+    TOOL_INFLIGHT,
+    RATELIMIT_REJECTED_TOTAL
+)
 
 limiter = RateLimiter()
 logging.basicConfig(level=logging.INFO)
@@ -45,10 +51,24 @@ async def lifespan(mcp_app: FastMCP):
                 start_time = time.time()
                 tenant_id = "default_tenant"
 
+                # 📈 [指标] 并发数 +1
+                TOOL_INFLIGHT.labels(tool=t_name).inc()
+
+
                 # 检查限流
                 allowed = await limiter.is_allowed(tenant_id, t_name)
                 if not allowed:
                     logger.warning(f"🛑 拦截！限流生效: {tenant_id} -> {t_name}")
+
+                    # 📈 [指标] 记录一次被限流
+                    TOOL_CALLS_TOTAL.labels(tool=t_name, status="rejected").inc()
+                    RATELIMIT_REJECTED_TOTAL.labels(tenant=tenant_id, tool=t_name).inc()
+
+
+                    # 👇 修复：由于它没进 try...finally，需要手动把并发数减 1
+                    TOOL_INFLIGHT.labels(tool=t_name).dec()
+
+
                     # 记一条被拦截的审计
                     record(tenant_id, t_name, kwargs, "rejected_ratelimit", int((time.time() - start_time) * 1000))
                     raise ToolError("Rate limit exceeded.")
@@ -59,14 +79,29 @@ async def lifespan(mcp_app: FastMCP):
                 try:
                     result = await upstream_session.call_tool(t_name, kwargs)
                     duration = int((time.time() - start_time) * 1000)
+
+                    # 📈 [指标] 记录耗时，记录成功状态
+                    TOOL_DURATION_SECONDS.labels(tool=t_name).observe(duration)
+                    TOOL_CALLS_TOTAL.labels(tool=t_name, status="ok").inc()
+
+
                     # 记录成功的审计
                     record(tenant_id, t_name, kwargs, "ok", duration)
                     return result.content
                 except Exception as e:
+
+                    # 📈 [指标] 记录失败状态
+                    TOOL_CALLS_TOTAL.labels(tool=t_name, status="error").inc()
+
+
                     duration = int((time.time() - start_time) * 1000)
                     # 记录失败的审计
                     record(tenant_id, t_name, kwargs, "upstream_error", duration)
                     raise e
+                finally:
+                    # 📈 [指标] 无论成功失败，离开时并发数 -1
+                    TOOL_INFLIGHT.labels(tool=t_name).dec()
+
             # 动态生成一个假的 Pydantic 模型，强行把原版 Schema 塞给 FastMCP
             props = t_schema.get("properties", {})
             required = t_schema.get("required", [])
