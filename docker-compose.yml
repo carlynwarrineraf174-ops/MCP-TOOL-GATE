@@ -1,0 +1,25 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
+  govern:
+    build: .
+    depends_on:
+      - redis
+    environment:
+      # 强行覆盖本地配置，让容器去连 Redis 容器
+      GOVERN_REDIS_URL: redis://redis:6379/0
+      GOVERN_DB_URL: sqlite+aiosqlite:///./govern.db
+      GOVERN_UPSTREAM_CMD: python
+      # 注意：settings 里 upstream_args 是 list[str]，pydantic-settings 会用 json.loads 解析它，
+      # 所以这里必须写成合法的 JSON 数组（外层引号是 YAML 的，保证整串是字符串）
+      GOVERN_UPSTREAM_ARGS: '["examples/demo_server.py"]'
+    ports:
+      # 把容器的 8000 端口暴露给宿主机，浏览器才能看 metrics
+      - "8000:8000"
+    # 👇 这两行是防退出的命根子
+    stdin_open: true
+    tty: true
