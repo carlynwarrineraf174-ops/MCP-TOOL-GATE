@@ -92,7 +92,7 @@ async def handle_call_tool(
         # 记录成功的审计，带上 tenant_id
         record(tenant_id, tool_name, arguments, "ok", duration)
 
-        return result.content
+        return result
     except Exception as e:
         duration = int((time.time() - start_time) * 1000)
         TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()

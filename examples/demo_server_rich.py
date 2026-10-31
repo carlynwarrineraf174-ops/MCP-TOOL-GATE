@@ -8,6 +8,22 @@ class Address(BaseModel):
     city: str = Field(description="城市名称，例如北京")
     street: str = Field(description="街道信息")
 
+
+
+class ShipResult(BaseModel):
+    status: str
+    address: dict
+
+@mcp.tool()
+def ship_order_structured(
+    order_id: str = Field(description="订单号"),
+) -> ShipResult:
+    """一个带结构化返回的工具，声明了 outputSchema。"""
+    return ShipResult(
+        status="shipped",
+        address={"city": "北京", "street": "长安街"}
+    )
+
 @mcp.tool()
 def complex_search(
     query: str = Field(description="搜索关键词"),
