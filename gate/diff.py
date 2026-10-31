@@ -2,17 +2,12 @@
 
 它只回答一个问题：
     一个按旧契约写的调用方，在新契约下会不会坏？
-
-三件事决定了它比"比字符串"难：
-    ① $ref 必须展开后再比      —— 只比 "$ref 字符串" 会漏判
-    ② oneOf/anyOf 顺序无意义   —— 不归一化会误报
-    ③ 请求侧和响应侧方向相反   —— 入参"收紧"是破坏，出参"放宽"才是破坏
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .rules import BREAKING, RISKY, SAFE, ORDER, worst
 
@@ -20,20 +15,14 @@ _ONE_OF_KEYS = ("oneOf", "anyOf", "allOf")
 _TIGHTEN_UP = ("minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties")
 _TIGHTEN_DOWN = ("maximum", "exclusiveMaximum", "maxLength", "maxItems", "maxProperties")
 
-# 我们"真正比较过"或"确认无需比较"的关键字。
-# 不在这张表里的关键字一旦出现/变化 → 一律 RISKY 转人工 review（宁报不漏）。
-# 这条设计抄自 ToolDelta："Unsupported keywords require review even when unchanged"。
 _KNOWN_KEYS = frozenset({
-    # 结构
     "type", "properties", "required", "items", "prefixItems", "additionalProperties",
     "oneOf", "anyOf", "allOf", "not", "if", "then", "else",
     "dependentRequired", "dependentSchemas", "dependencies", "propertyNames",
-    # 取值约束
     "enum", "const", "pattern", "format", "multipleOf",
     "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
     "minLength", "maxLength", "minItems", "maxItems", "uniqueItems",
     "contains", "minContains", "maxContains", "minProperties", "maxProperties",
-    # 元数据（不影响调用，已知即可）
     "title", "description", "default", "examples", "deprecated",
     "readOnly", "writeOnly", "$schema", "$id", "$comment", "$defs", "definitions",
     "contentMediaType", "contentEncoding", "contentSchema", "discriminator", "nullable",
@@ -54,10 +43,6 @@ def _canon(obj: object) -> str:
 
 
 def _type_set(node: dict) -> set | None:
-    """把 type 归一成集合：`"string"` 和 `["string","null"]` 要能比较。
-
-    None = 这个 schema 没写 type（JSON Schema 语义：接受任意类型）。
-    """
     t = node.get("type")
     if t is None:
         return None
@@ -66,9 +51,7 @@ def _type_set(node: dict) -> set | None:
 
 # ---------------------------------------------------------------- 预处理
 
-
 def _resolve(node, root, depth: int = 0):
-    """展开本地 $ref（#/...）。展开后再比，才不会只比了个指针字符串。"""
     if depth > 20:
         return node
     if isinstance(node, list):
@@ -91,7 +74,6 @@ def _resolve(node, root, depth: int = 0):
 
 
 def _normalize(node):
-    """oneOf/anyOf/allOf 的顺序没有语义，排序后再比，避免纯误报。"""
     if isinstance(node, list):
         return [_normalize(x) for x in node]
     if not isinstance(node, dict):
@@ -105,33 +87,17 @@ def _normalize(node):
     return out
 
 
-# 纯元数据：写法不同但语义相同，参与比较只会制造假报警
 _EQ_DROP = frozenset({"title", "$comment", "$id", "$schema", "examples"})
 
-
 def _simplify(node):
-    """语义等价归一化：把「写法不同、意思相同」的 schema 收敛成同一种形态。
-
-    只做**无损**变换（变换后语义不变），目的是消除纯误报 —— 对 outputSchema 尤其明显：
-    生成器产出的输出 schema 常有 allOf 包一层、单元素 type 数组、空 required，
-    写法一换就会被判成"返回字段被删除"。
-
-        type: ["string"]                    → type: "string"
-        {"allOf": [X]} / {"oneOf": [X]}     → X                （单分支）
-        required: [] / additionalProperties: true → 删掉        （等价于不写）
-        title / $comment / $id / $schema / examples → 删掉      （纯元数据）
-    """
     if isinstance(node, list):
         return [_simplify(x) for x in node]
     if not isinstance(node, dict):
         return node
-
-    # 单分支组合子：{"oneOf": [X]} 语义上就是 X
     for key in _ONE_OF_KEYS:
         branches = node.get(key)
         if isinstance(branches, list) and len(branches) == 1 and len(node) == 1:
             return _simplify(branches[0])
-
     out = {}
     for key, value in node.items():
         if key in _EQ_DROP:
@@ -148,7 +114,6 @@ def _simplify(node):
 
 
 def prepare_schema(doc: dict | None) -> dict:
-    """快照里的一份 schema → 可比较的形态（展开 $ref → 语义归一 → 顺序归一）。"""
     if not doc:
         return {}
     return _normalize(_simplify(_resolve(doc, doc)))
@@ -156,25 +121,23 @@ def prepare_schema(doc: dict | None) -> dict:
 
 # ---------------------------------------------------------------- 比较
 
-
 def _add(out: list[Finding], tool: str, path: str, kind: str, sev: str, detail: str) -> None:
     out.append(Finding(tool=tool, path=path, kind=kind, severity=sev, detail=detail))
 
 
 def _diff_enum(old: dict, new: dict, out: list, tool: str, path: str, side: str) -> None:
-
     old_enum, new_enum = old.get("enum"), new.get("enum")
     if old_enum is None and new_enum is None:
         return
     o = {_canon(x) for x in old_enum} if isinstance(old_enum, list) else None
     n = {_canon(x) for x in new_enum} if isinstance(new_enum, list) else None
 
-    if o is None and n is not None:  # 原来任意值 → 现在钉死集合 = 收窄
+    if o is None and n is not None:
         if side == "request":
             _add(out, tool, f"{path}.enum", "enum_added", BREAKING,
                  f"新增 enum（原来接受任意值），老取值可能非法: {sorted(n)}")
         return
-    if o is None or n is None:  # 去掉 enum = 放宽，静默
+    if o is None or n is None:
         return
     if side == "request":
         removed, added = o - n, n - o
@@ -195,211 +158,152 @@ def _diff_range(old: dict, new: dict, out: list, tool: str, path: str, side: str
     if side != "request":
         return
     for key in _TIGHTEN_UP:
-        if key not in new:
-            continue
+        if key not in new: continue
         if key not in old:
-            _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING,
-                 f"新增下限 {key}={new[key]}，老取值可能越界")
-        elif new[key] > old[key]:
-            _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING,
-                 f"{key} 从 {old[key]} 提高到 {new[key]}")
+            _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING, f"新增下限 {key}={new[key]}")
+        else:
+            ov, nv = old[key], new[key]
+            if not isinstance(ov, (int, float)) or not isinstance(nv, (int, float)) or isinstance(ov, bool) or isinstance(nv, bool):
+                _add(out, tool, f"{path}.{key}", "unsupported_value", RISKY, f"{key} 类型非数值（{ov!r} -> {nv!r}），转人工确认")
+                continue
+            if nv > ov:
+                _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING, f"{key} 从 {ov} 提高到 {nv}")
     for key in _TIGHTEN_DOWN:
-        if key not in new:
-            continue
+        if key not in new: continue
         if key not in old:
-            _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING,
-                 f"新增上限 {key}={new[key]}，老取值可能越界")
-        elif new[key] < old[key]:
-            _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING,
-                 f"{key} 从 {old[key]} 降到 {new[key]}")
+            _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING, f"新增上限 {key}={new[key]}")
+        else:
+            ov, nv = old[key], new[key]
+            if not isinstance(ov, (int, float)) or not isinstance(nv, (int, float)) or isinstance(ov, bool) or isinstance(nv, bool):
+                _add(out, tool, f"{path}.{key}", "unsupported_value", RISKY, f"{key} 类型非数值（{ov!r} -> {nv!r}），转人工确认")
+                continue
+            if nv < ov:
+                _add(out, tool, f"{path}.{key}", "range_tightened", BREAKING, f"{key} 从 {ov} 降到 {nv}")
 
 
 def _diff_object(old: dict, new: dict, out: list, tool: str, path: str, side: str) -> None:
-
-    old_props = old.get("properties") or {}
-    new_props = new.get("properties") or {}
-    old_req = set(old.get("required") or [])
-    new_req = set(new.get("required") or [])
+    old_props, new_props = old.get("properties") or {}, new.get("properties") or {}
+    old_req, new_req = set(old.get("required") or []), set(new.get("required") or [])
 
     if isinstance(old_props, dict) and isinstance(new_props, dict):
         for name in sorted(set(old_props) - set(new_props)):
-            if side == "request":
-                _add(out, tool, f"{path}.{name}", "prop_removed", BREAKING,
-                     f"入参 {name} 被删除")
-            else:
-                _add(out, tool, f"{path}.{name}", "response_prop_removed", BREAKING,
-                     f"返回字段 {name} 被删除")
-
+            _add(out, tool, f"{path}.{name}", "prop_removed" if side == "request" else "response_prop_removed", BREAKING, f"入参 {name} 被删除" if side == "request" else f"返回字段 {name} 被删除")
         for name in sorted(set(new_props) - set(old_props)):
             if side == "request":
                 sev = BREAKING if name in new_req else SAFE
-                kind = "prop_added_required" if sev is BREAKING else "prop_added_optional"
-                _add(out, tool, f"{path}.{name}", kind, sev,
-                     f"新增入参 {name}（{'必填' if sev is BREAKING else '可选'}）")
-
+                _add(out, tool, f"{path}.{name}", "prop_added_required" if sev is BREAKING else "prop_added_optional", sev, f"新增入参 {name}")
         for name in sorted(set(old_props) & set(new_props)):
             _diff_node(old_props[name], new_props[name], out, tool, f"{path}.{name}", side)
 
-    # required 集合变化（新增的 property 已经在上面报过，不重复）
     for name in sorted(new_req - old_req):
         if name in old_props:
-            if side == "request":
-                _add(out, tool, f"{path}.{name}", "required_added", BREAKING,
-                     f"{name} 由可选变必填（即使有 default 也一样）")
-            else:
-                _add(out, tool, f"{path}.{name}", "response_required_added", SAFE,
-                     f"返回字段 {name} 变为必有")
+            _add(out, tool, f"{path}.{name}", "required_added" if side == "request" else "response_required_added", BREAKING if side == "request" else SAFE, f"{name} 由可选变必填" if side == "request" else f"返回字段 {name} 变为必有")
     for name in sorted(old_req - new_req):
-        if side == "request":
-            _add(out, tool, f"{path}.{name}", "required_removed", SAFE,
-                 f"{name} 由必填变可选")
-        else:
-            _add(out, tool, f"{path}.{name}", "response_required_removed", BREAKING,
-                 f"返回字段 {name} 不再保证存在")
+        _add(out, tool, f"{path}.{name}", "required_removed" if side == "request" else "response_required_removed", SAFE if side == "request" else BREAKING, f"{name} 由必填变可选" if side == "request" else f"返回字段 {name} 不再保证存在")
 
-    old_dep = old.get("dependentRequired") or {}
-    new_dep = new.get("dependentRequired") or {}
+    old_dep, new_dep = old.get("dependentRequired") or {}, new.get("dependentRequired") or {}
     for key in sorted(new_dep):
-        added = set(new_dep[key]) - set(old_dep.get(key) or [])
-        if added:
-            _add(out, tool, f"{path}.dependentRequired.{key}","dependent_required_added",
-                 BREAKING,f"存在{key}时新增必填{sorted(added)}")
+        if set(new_dep[key]) - set(old_dep.get(key) or []):
+            _add(out, tool, f"{path}.dependentRequired.{key}", "dependent_required_added", BREAKING, f"存在{key}时新增必填")
 
-    if old.get("additionalProperties", True) is not False and new.get("additionalProperties") is False:
+    old_ap, new_ap = old.get("additionalProperties"), new.get("additionalProperties")
+    if isinstance(old_ap, dict) and isinstance(new_ap, dict):
+        _diff_node(old_ap, new_ap, out, tool, f"{path}.additionalProperties", side)
+    elif isinstance(old_ap, dict) and new_ap is False:
         if side == "request":
-            _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING,
-                 "additionalProperties 改为 false，老调用多传的字段会被拒")
+            _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING, "additionalProperties 从 schema 改为 false")
+    elif old_ap is not False and new_ap is False:
+        if side == "request":
+            _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING, "additionalProperties 改为 false")
 
 
 def _diff_unsupported(old: dict, new: dict, out: list, tool: str, path: str) -> None:
-    """没见过的关键字 → 转人工 review。
-
-    为什么这条重要：静默放过 = 给调用方一个**虚假的通过信号**。
-    漏报比误报贵得多 —— 误报可以关掉，漏报会在线上炸。
-    """
     for key in sorted(set(old) | set(new)):
-        if key in _KNOWN_KEYS or key.startswith("x-"):
-            continue
+        if key in _KNOWN_KEYS or key.startswith("x-"): continue
         if old.get(key) != new.get(key):
-            _add(out, tool, f"{path}.{key}", "unsupported_keyword", RISKY,
-                 f"未支持的 JSON Schema 关键字 `{key}` 发生变化 → 转人工 review")
+            _add(out, tool, f"{path}.{key}", "unsupported_keyword", RISKY, f"未支持的关键字 {key} 变化")
 
 
 def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
-    if not isinstance(old, dict) or not isinstance(new, dict):
-        return
-    old_t = _type_set(old)
-    new_t = _type_set(new)
+    if old is True: old = {}
+    elif old is False: old = {"not": {}}
+    if new is True: new = {}
+    elif new is False: new = {"not": {}}
+
+    if not isinstance(old, dict) or not isinstance(new, dict): return
+
+    old_t, new_t = _type_set(old), _type_set(new)
     if old_t is None and new_t is not None:
         if side == "request":
-            _add(out, tool, path, "type_restricted", BREAKING,
-                 f"新增类型约束 {sorted(new_t)}（原来接受任意类型）")
+            _add(out, tool, path, "type_restricted", BREAKING, f"新增类型约束 {sorted(new_t)}")
     elif old_t is not None and new_t is not None:
         dropped = old_t - new_t
         if dropped:
-            _add(out, tool, path, "type_changed", BREAKING,
-                 f"类型 {sorted(old_t)} → {sorted(new_t)}（去掉 {sorted(dropped)}）")
+            _add(out, tool, path, "type_changed", BREAKING, f"类型 {sorted(old_t)} → {sorted(new_t)}")
 
     if old.get("const") != new.get("const") and new.get("const") is not None:
-        _add(out, tool, f"{path}.const", "const_changed", BREAKING,
-             f"const {old.get('const')!r} → {new.get('const')!r}（取值被钉死）")
-
+        _add(out, tool, f"{path}.const", "const_changed", BREAKING, "取值被钉死")
     if old.get("pattern") != new.get("pattern"):
-        _add(out, tool, f"{path}.pattern", "pattern_changed", RISKY,
-             "正则变化：无法程序化判定包含关系 → 转人工 review")
-
+        _add(out, tool, f"{path}.pattern", "pattern_changed", RISKY, "正则变化 → 转人工")
     if "description" in old and "description" in new and old["description"] != new["description"]:
-        _add(out, tool, f"{path}.description", "description_changed", RISKY,
-             "描述变化：不影响代码，但会影响模型选工具")
-
+        _add(out, tool, f"{path}.description", "description_changed", RISKY, "描述变化")
     if "default" in old or "default" in new:
         if old.get("default") != new.get("default"):
-            _add(out, tool, f"{path}.default", "default_changed", RISKY,
-                 f"default {old.get('default')!r} → {new.get('default')!r}")
-
-    # 在 _diff_node 里找地方加：
+            _add(out, tool, f"{path}.default", "default_changed", RISKY, "default 变化")
     if old.get("format") != new.get("format"):
-        _add(out, tool, f"{path}.format", "format_changed", RISKY,
-             f"format 从 {old.get('format')} 变为 {new.get('format')}")
+        _add(out, tool, f"{path}.format", "format_changed", RISKY, "format 变化")
 
     _diff_enum(old, new, out, tool, path, side)
     _diff_range(old, new, out, tool, path, side)
 
     for key in _ONE_OF_KEYS:
-        if key in old and key in new:
-            if _canon(old[key]) != _canon(new[key]):
-                _add(out, tool, f"{path}.{key}", "union_changed", RISKY,
-                     f"{key} 分支内容变化（顺序不同不算）")
+        if key in old and key in new and _canon(old[key]) != _canon(new[key]):
+            _add(out, tool, f"{path}.{key}", "union_changed", RISKY, "分支内容变化")
 
     old_items, new_items = old.get("items"), new.get("items")
     if isinstance(old_items, dict) and isinstance(new_items, dict):
         _diff_node(old_items, new_items, out, tool, f"{path}[]", side)
-    elif side == "request" and not isinstance(old_items, dict) and isinstance(new_items, dict):
-        _add(out, tool, f"{path}.items", "items_restricted", BREAKING,
-             "新增数组元素约束（原来任意元素都合法）")
-
+    elif isinstance(old_items, list) and isinstance(new_items, list):
+        for i, (oi, ni) in enumerate(zip(old_items, new_items)):
+            _diff_node(oi, ni, out, tool, f"{path}[{i}]", side)
+        if len(new_items) < len(old_items) and side == "request":
+            _add(out, tool, f"{path}.items", "items_restricted", BREAKING, "数组元素变少")
+    elif side == "request" and not isinstance(old_items, (dict, list)) and isinstance(new_items, (dict, list)):
+        _add(out, tool, f"{path}.items", "items_restricted", BREAKING, "新增数组元素约束")
 
     if old.get("readOnly") is not True and new.get("readOnly") is True:
-        _add(out, tool, f"{path}.readOnly", "readonly_added", BREAKING,
-             "入参变更为 readOnly，拒绝外部传入")
-
+        _add(out, tool, f"{path}.readOnly", "readonly_added", BREAKING, "变为 readOnly")
     if old.get("uniqueItems") is not True and new.get("uniqueItems") is True:
-        _add(out, tool, f"{path}.uniqueItems", "unique_items_changed", BREAKING,
-             "原来能传重复值，现在会被拒")
-
+        _add(out, tool, f"{path}.uniqueItems", "unique_items_changed", BREAKING, "现在会被拒重复值")
     if old.get("prefixItems") != new.get("prefixItems"):
-        _add(out, tool, f"{path}.prefixItems", "prefix_items_changed", RISKY,
-             "数组结构变化，无法程序化确认兼容")
-
+        _add(out, tool, f"{path}.prefixItems", "prefix_items_changed", RISKY, "数组结构变化")
 
     _diff_object(old, new, out, tool, path, side)
     _diff_unsupported(old, new, out, tool, path)
 
 
-# ---------------------------------------------------------------- 入口
-
-
 def diff_tool(name: str, old: dict, new: dict) -> list[Finding]:
-    """比一个工具的契约。old/new 形如 {description, input_schema, output_schema}。"""
     out: list[Finding] = []
-
     if old.get("description") != new.get("description"):
-        _add(out, name, f"{name}.description", "description_changed", RISKY,
-             "工具描述变化：模型选工具的输入变了")
-
-    _diff_node(
-        prepare_schema(old.get("input_schema")), prepare_schema(new.get("input_schema")),
-        out, name, f"{name}.input", "request",
-    )
-
+        _add(out, name, f"{name}.description", "description_changed", RISKY, "工具描述变化")
+    _diff_node(prepare_schema(old.get("input_schema")), prepare_schema(new.get("input_schema")), out, name, f"{name}.input", "request")
     old_out, new_out = old.get("output_schema"), new.get("output_schema")
     if old_out and not new_out:
-        _add(out, name, f"{name}.output", "output_schema_removed", RISKY,
-             "返回 schema 不再声明，客户端无法校验返回值")
+        _add(out, name, f"{name}.output", "output_schema_removed", RISKY, "不再声明返回 schema")
     elif old_out and new_out:
-        _diff_node(prepare_schema(old_out), prepare_schema(new_out),
-                   out, name, f"{name}.output", "response")
-
+        _diff_node(prepare_schema(old_out), prepare_schema(new_out), out, name, f"{name}.output", "response")
     return out
 
 
 def diff_snapshots(old_tools: dict, new_tools: dict) -> list[Finding]:
-    """比两份快照（tools.json 的内容）。"""
     out: list[Finding] = []
     for name in sorted(set(old_tools) - set(new_tools)):
         _add(out, name, name, "tool_removed", BREAKING, "工具被删除")
     for name in sorted(set(new_tools) - set(old_tools)):
-        _add(out, name, name, "tool_added", SAFE, "新增工具（放进评测看选择干扰）")
+        _add(out, name, name, "tool_added", SAFE, "新增工具")
     for name in sorted(set(old_tools) & set(new_tools)):
-        out.extend(diff_tool(name, old_tools[name], new_tools[name]))
+        try:
+            out.extend(diff_tool(name, old_tools[name], new_tools[name]))
+        except Exception as e:
+            _add(out, name, name, "engine_crash", RISKY, f"diff 引擎异常：{type(e).__name__}: {e}")
     return out
-
-
-__all__ = [
-    "Finding",
-    "prepare_schema",
-    "diff_tool",
-    "diff_snapshots",
-    "worst",
-    "ORDER",
-]
