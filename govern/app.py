@@ -1,6 +1,11 @@
 import logging
 from contextlib import AsyncExitStack
 import asyncio
+import contextlib
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+import uvicorn
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -83,29 +88,33 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         TOOL_INFLIGHT.labels(tool=tool_name).dec()
 
 
+
+
+
 async def main():
-    """程序的主入口：连接上游 -> 启动自身"""
     global upstream_session
     async with AsyncExitStack() as stack:
-        # 1. 初始化数据库
         await init_db()
 
         logger.info(f"正在连接上游: {settings.upstream_command} {settings.upstream_args}")
-        params = StdioServerParameters(
-            command=settings.upstream_command,
-            args=settings.upstream_args
-        )
+        params = StdioServerParameters(command=settings.upstream_command, args=settings.upstream_args)
 
-        # 2. 连接上游 Server
         read, write = await stack.enter_async_context(stdio_client(params))
         upstream_session = await stack.enter_async_context(ClientSession(read, write))
         await upstream_session.initialize()
         logger.info("✅ 成功连接到上游 MCP Server")
 
-        # 3. 作为 Server 启动自身，监听 stdio
-        async with stdio_server() as (read_stream, write_stream):
-            await proxy_server.run(
-                read_stream,
-                write_stream,
-                proxy_server.create_initialization_options()
+        # 核心：启动 HTTP 服务
+        session_manager = StreamableHTTPSessionManager(app=proxy_server)
+
+        async with contextlib.AsyncExitStack() as async_stack:
+            await async_stack.enter_async_context(session_manager.run())
+
+            app = Starlette(
+                routes=[Mount("/mcp", app=session_manager.handle_request)]
             )
+
+            # 监听 8001 端口
+            config = uvicorn.Config(app, host="0.0.0.0", port=8001, log_level="info")
+            server = uvicorn.Server(config)
+            await server.serve()
