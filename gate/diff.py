@@ -136,6 +136,9 @@ def _diff_enum(old: dict, new: dict, out: list, tool: str, path: str, side: str)
         if side == "request":
             _add(out, tool, f"{path}.enum", "enum_added", BREAKING,
                  f"新增 enum（原来接受任意值），老取值可能非法: {sorted(n)}")
+        else:  # side == "response"
+            _add(out, tool, f"{path}.enum", "response_enum_added", RISKY,
+                 f"响应侧 enum 从无到有（老客户端见过任意值，现在被限定）: {sorted(n)}")
         return
     if o is None or n is None:
         return
@@ -271,7 +274,10 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
         dropped = old_t - new_t
         if dropped:
             _add(out, tool, path, "type_changed", BREAKING, f"类型 {sorted(old_t)} → {sorted(new_t)}")
-
+    if side == "response":
+        if old.get("const") is not None and new.get("const") is None:
+            _add(out, tool, f"{path}.const", "response_const_removed", BREAKING,
+                 "响应侧 const 消失：老客户端读不到固定值")
     if old.get("const") != new.get("const") and new.get("const") is not None:
         _add(out, tool, f"{path}.const", "const_changed", BREAKING, "取值被钉死")
     if old.get("pattern") != new.get("pattern"):
@@ -313,6 +319,40 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
         _add(out, tool, f"{path}.uniqueItems", "unique_items_changed", BREAKING, "现在会被拒重复值")
     if old.get("prefixItems") != new.get("prefixItems"):
         _add(out, tool, f"{path}.prefixItems", "prefix_items_changed", RISKY, "数组结构变化")
+
+    # P0-7：已知但之前不比较的关键字，现在显式比较
+    if old.get("multipleOf") != new.get("multipleOf"):
+        _add(out, tool, f"{path}.multipleOf", "multiple_of_changed", RISKY,
+             f"multipleOf 变化：{old.get('multipleOf')} → {new.get('multipleOf')}")
+
+    for key in ("not", "if", "then", "else"):
+        if key in old or key in new:
+            if _canon(old.get(key)) != _canon(new.get(key)):
+                kind = "if_then_changed" if key in ("if", "then", "else") else "not_changed"
+                _add(out, tool, f"{path}.{key}", kind, RISKY, f"`{key}` 分支变化")
+
+    if old.get("contains") is not None and new.get("contains") is not None:
+        if _canon(old["contains"]) != _canon(new["contains"]):
+            _add(out, tool, f"{path}.contains", "contains_changed", RISKY,
+                 "数组 `contains` 约束变化")
+    elif old.get("contains") is not None and new.get("contains") is None:
+        # 去掉 contains = 放宽，静默
+        pass
+    elif old.get("contains") is None and new.get("contains") is not None:
+        if side == "request":
+            _add(out, tool, f"{path}.contains", "contains_changed", RISKY,
+                 "新增 `contains` 约束")
+
+    if old.get("propertyNames") is not None and new.get("propertyNames") is not None:
+        if _canon(old["propertyNames"]) != _canon(new["propertyNames"]):
+            _add(out, tool, f"{path}.propertyNames", "property_names_changed", RISKY,
+                 "`propertyNames` 约束变化")
+    elif old.get("propertyNames") is not None and new.get("propertyNames") is None:
+        pass
+    elif old.get("propertyNames") is None and new.get("propertyNames") is not None:
+        if side == "request":
+            _add(out, tool, f"{path}.propertyNames", "property_names_changed", RISKY,
+                 "新增 `propertyNames` 约束")
 
     _diff_object(old, new, out, tool, path, side)
     _diff_unsupported(old, new, out, tool, path)

@@ -395,6 +395,66 @@ class DiffTest(unittest.TestCase):
         new = tool(obj(a=True))
         self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
 
+    # ---- P0-5: 响应侧 const / enum 方向 ----
+    def test_response_const_removed_is_breaking(self):
+        """响应侧 const 消失：老客户端依赖固定值，现在拿不到了 → BREAKING。"""
+        old = {"description": "d", "input_schema": {"type": "object", "properties": {}}, "output_schema": obj(v={"type": "string", "const": "ok"})}
+        new = {"description": "d", "input_schema": {"type": "object", "properties": {}}, "output_schema": obj(v={"type": "string"})}
+        found = diff_snapshots({"t": old}, {"t": new})
+        kinds = {f.kind for f in found}
+        self.assertIn("response_const_removed", kinds)
+        self.assertEqual(worst(found), BREAKING)
+
+    def test_response_enum_added_is_risky(self):
+        """响应侧 enum 从无到有：老客户端见过任意值，现在被限定 → RISKY（转人工）。"""
+        old = {"description": "d", "input_schema": {"type": "object", "properties": {}}, "output_schema": obj(v={"type": "string"})}
+        new = {"description": "d", "input_schema": {"type": "object", "properties": {}}, "output_schema": obj(v={"type": "string", "enum": ["a", "b"]})}
+        found = diff_snapshots({"t": old}, {"t": new})
+        kinds = {f.kind for f in found}
+        self.assertIn("response_enum_added", kinds)
+        self.assertEqual(worst(found), RISKY)
+
+    # ---- P0-7: 已知关键字不比较 ----
+    def test_multiple_of_changed_is_risky(self):
+        old = tool(obj(n={"type": "integer", "multipleOf": 3}))
+        new = tool(obj(n={"type": "integer", "multipleOf": 7}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        kinds = {f.kind for f in found}
+        self.assertIn("multiple_of_changed", kinds)
+        self.assertEqual(worst(found), RISKY)
+
+    def test_not_branch_changed_is_risky(self):
+        old = tool(obj(v={"not": {"type": "string"}}))
+        new = tool(obj(v={"not": {"type": "integer"}}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        kinds = {f.kind for f in found}
+        self.assertIn("not_changed", kinds)
+        self.assertEqual(worst(found), RISKY)
+
+    def test_if_then_changed_is_risky(self):
+        old = tool(obj(v={"type": "string", "if": {"minLength": 1}, "then": {"maxLength": 10}}))
+        new = tool(obj(v={"type": "string", "if": {"minLength": 1}, "then": {"maxLength": 5}}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        kinds = {f.kind for f in found}
+        self.assertIn("if_then_changed", kinds)
+        self.assertEqual(worst(found), RISKY)
+
+    def test_contains_changed_is_risky(self):
+        old = tool(obj(v={"type": "array", "contains": {"type": "string"}}))
+        new = tool(obj(v={"type": "array", "contains": {"type": "integer"}}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        kinds = {f.kind for f in found}
+        self.assertIn("contains_changed", kinds)
+        self.assertEqual(worst(found), RISKY)
+
+    def test_property_names_changed_is_risky(self):
+        old = tool(obj(v={"type": "object", "propertyNames": {"pattern": "^[a-z]+$"}}))
+        new = tool(obj(v={"type": "object", "propertyNames": {"pattern": "^[a-z0-9]+$"}}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        kinds = {f.kind for f in found}
+        self.assertIn("property_names_changed", kinds)
+        self.assertEqual(worst(found), RISKY)
+
 
 
 if __name__ == "__main__":

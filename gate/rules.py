@@ -57,6 +57,13 @@ RULES: list[tuple[str, str, str, str, str]] = [
      "老调用多传的字段原来合法，现在受 schema 约束"),
     ("schema_rejected", "schema 由可接受改为 false（拒绝一切）", "request", BREAKING,
      "老调用传任意值都会被拒，等于工具不可用"),
+    ("response_const_removed", "响应侧 const 消失", "response", BREAKING, "老客户端依赖固定值，现在拿不到"),
+    ("response_enum_added", "响应侧 enum 从无到有", "response", RISKY, "老客户端见过任意值，现在被限定 → 转人工"),
+    ("multiple_of_changed", "multipleOf 变化", "both", RISKY, "倍数包含关系无法程序化判定 → 转人工"),
+    ("not_changed", "not 分支变化", "both", RISKY, "not 的内容变化无法程序化确认兼容"),
+    ("if_then_changed", "if/then/else 变化", "both", RISKY, "条件约束变化无法程序化确认"),
+    ("contains_changed", "contains 变化", "both", RISKY, "数组包含约束变化无法程序化确认"),
+    ("property_names_changed", "propertyNames 变化", "both", RISKY, "对象键名约束变化无法程序化确认"),
 ]
 
 
