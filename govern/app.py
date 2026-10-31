@@ -1,6 +1,6 @@
 import logging
 from contextlib import AsyncExitStack
-import asyncio
+import os
 import contextlib
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 import uvicorn
@@ -11,7 +11,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 # 👇 导入底层的 Server 和类型
 from mcp.server.lowlevel import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.lowlevel.server import request_ctx
 import mcp.types as types
 
 from govern.ratelimit import RateLimiter
@@ -42,43 +42,57 @@ async def handle_list_tools() -> list[types.Tool]:
     return result.tools
 
 
+def _resolve_tenant() -> str:
+    """优先取 HTTP 请求头 X-Tenant-Id，取不到再回退到环境变量。
+
+    注意：lowlevel Server 的 call_tool 回调只会传 (name, arguments)，
+    不会注入 Context —— 请求信息要从 request_ctx 这个 ContextVar 里拿。
+    """
+    try:
+        request = request_ctx.get().request
+    except LookupError:
+        request = None
+    if request is not None:
+        return request.headers.get("x-tenant-id", "anonymous")
+    return os.environ.get("GOVERN_TENANT_ID", "default_tenant")
+
+
 @proxy_server.call_tool()
-async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    """拦截工具调用，附带治理逻辑后原样转发"""
+async def handle_call_tool(
+        name: str,
+        arguments: dict,
+) -> list[types.TextContent]:
     import time
     start_time = time.time()
-    tenant_id = "default_tenant"
     tool_name = name
+    tenant_id = _resolve_tenant()
 
     TOOL_INFLIGHT.labels(tool=tool_name).inc()
 
-    # 1. 检查限流
+    # 检查限流
     allowed = await limiter.is_allowed(tenant_id, tool_name)
     if not allowed:
         logger.warning(f"🛑 拦截！限流生效: {tenant_id} -> {tool_name}")
         TOOL_CALLS_TOTAL.labels(tool=tool_name, status="rejected").inc()
         RATELIMIT_REJECTED_TOTAL.labels(tenant=tenant_id, tool=tool_name).inc()
         TOOL_INFLIGHT.labels(tool=tool_name).dec()
-
-        # 异步记审计
         record(tenant_id, tool_name, arguments, "rejected_ratelimit", 0)
-        # 底层 Server 抛出异常会让客户端收到 JSON-RPC error
+
+        # 这里暂时保持原样，P1-3 我们再去改成标准错误
         raise Exception("Rate limit exceeded.")
 
-    logger.info(f"✅ 放行: {tool_name}")
+    logger.info(f"✅ 放行: [{tenant_id}] -> {tool_name}")
 
-    # 2. 转发给上游
     try:
         result = await upstream_session.call_tool(tool_name, arguments)
         duration = int((time.time() - start_time) * 1000)
 
         TOOL_DURATION_SECONDS.labels(tool=tool_name).observe(duration / 1000.0)
         TOOL_CALLS_TOTAL.labels(tool=tool_name, status="ok").inc()
+        # 记录成功的审计，带上 tenant_id
         record(tenant_id, tool_name, arguments, "ok", duration)
 
-        # 返回上游原始的内容结构
         return result.content
-
     except Exception as e:
         duration = int((time.time() - start_time) * 1000)
         TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()

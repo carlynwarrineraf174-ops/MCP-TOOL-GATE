@@ -318,6 +318,84 @@ class DiffTest(unittest.TestCase):
         found = diff_snapshots({"t": old}, {"t": new})
         self.assertIn("type_changed", {f.kind for f in found})
 
+    # ---- P0-1: additionalProperties 的「从无到有」 ----
+    def test_additional_props_none_to_schema_is_breaking(self):
+        """老：不加约束（任意字段合法）；新：字段受 schema 约束 → 收紧。"""
+        old = tool(obj(a=STR))
+        new = tool({**obj(a=STR), "additionalProperties": {"type": "string"}})
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("additional_props_tightened", {f.kind for f in found})
+        self.assertEqual(worst(found), BREAKING)
+
+
+
+
+    def test_additional_props_schema_to_schema_recurses(self):
+        """dict → dict 已修，这里锁住不回归。"""
+        old = tool({**obj(a=STR), "additionalProperties": {"type": "string"}})
+        new = tool({**obj(a=STR), "additionalProperties": {"type": "integer"}})
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("type_changed", {f.kind for f in found})
+        self.assertEqual(worst(found), BREAKING)
+
+
+
+
+    def test_additional_props_schema_to_false_is_breaking(self):
+        """dict → false 已修，这里锁住不回归。"""
+        old = tool({**obj(a=STR), "additionalProperties": {"type": "string"}})
+        new = tool({**obj(a=STR), "additionalProperties": False})
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("additional_props_closed", {f.kind for f in found})
+        self.assertEqual(worst(found), BREAKING)
+
+    # ---- P0-2: tuple items 长度变化 ----
+    def test_tuple_items_longer_is_breaking(self):
+        """tuple items 变长 = 新增位置约束，对老数组是收紧。"""
+        old = tool(obj(a={"type": "array", "items": [{"type": "string"}]}))
+        new = tool(obj(a={"type": "array", "items": [{"type": "string"}, {"type": "integer"}]}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("items_restricted", {f.kind for f in found})
+        self.assertEqual(worst(found), BREAKING)
+
+    def test_tuple_items_shorter_is_breaking(self):
+        """变短已修，回归保护。"""
+        old = tool(obj(a={"type": "array", "items": [{"type": "string"}, {"type": "integer"}]}))
+        new = tool(obj(a={"type": "array", "items": [{"type": "string"}]}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("items_restricted", {f.kind for f in found})
+
+    def test_tuple_items_same_length_recurses(self):
+        """同长：逐项递归比较（已有逻辑）。"""
+        old = tool(obj(a={"type": "array", "items": [{"type": "string"}]}))
+        new = tool(obj(a={"type": "array", "items": [{"type": "integer"}]}))
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("type_changed", {f.kind for f in found})
+
+    # ---- P0-3: 布尔 schema ----
+    def test_boolean_true_to_false_is_breaking(self):
+        """true（接受一切）→ false（拒绝一切）= 请求侧收紧。"""
+        old = tool(obj(a=True))
+        new = tool(obj(a=False))
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("schema_rejected", {f.kind for f in found})
+        self.assertEqual(worst(found), BREAKING)
+
+    def test_typed_to_false_is_breaking(self):
+        """string → false = 请求侧收紧。"""
+        old = tool(obj(a={"type": "string"}))
+        new = tool(obj(a=False))
+        found = diff_snapshots({"t": old}, {"t": new})
+        self.assertIn("schema_rejected", {f.kind for f in found})
+        self.assertEqual(worst(found), BREAKING)
+
+    def test_boolean_false_to_true_is_safe(self):
+        """false → true = 放宽，不报警。"""
+        old = tool(obj(a=False))
+        new = tool(obj(a=True))
+        self.assertEqual(diff_snapshots({"t": old}, {"t": new}), [])
+
+
 
 if __name__ == "__main__":
     unittest.main()

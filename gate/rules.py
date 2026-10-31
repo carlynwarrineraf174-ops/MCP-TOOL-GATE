@@ -51,7 +51,12 @@ RULES: list[tuple[str, str, str, str, str]] = [
     ("prefix_items_changed","prefixItems 数量或内容变化","both",RISKY,"数组结构变化，无法程序化确认兼容"),
     ("enum_added", "原来无 enum、新增 enum", "request", BREAKING, "老调用可传任意值，现在只有枚举内的值合法"),
     ("type_restricted", "原来无 type、新增 type", "request", BREAKING, "原来接受任意类型，现在只接受指定类型"),
-    ("items_restricted", "原来无 items、新增 items", "request", BREAKING, "原来任意元素合法，现在元素形状被约束"),
+    ("items_restricted", "items 约束新增/变长/变短", "request", BREAKING,
+     "原来任意元素合法，现在元素形状/数量被约束"),
+    ("additional_props_tightened", "additionalProperties 从无约束改为 schema", "request", BREAKING,
+     "老调用多传的字段原来合法，现在受 schema 约束"),
+    ("schema_rejected", "schema 由可接受改为 false（拒绝一切）", "request", BREAKING,
+     "老调用传任意值都会被拒，等于工具不可用"),
 ]
 
 

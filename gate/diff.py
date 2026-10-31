@@ -207,15 +207,30 @@ def _diff_object(old: dict, new: dict, out: list, tool: str, path: str, side: st
             _add(out, tool, f"{path}.dependentRequired.{key}", "dependent_required_added", BREAKING, f"存在{key}时新增必填")
 
     old_ap, new_ap = old.get("additionalProperties"), new.get("additionalProperties")
-    if isinstance(old_ap, dict) and isinstance(new_ap, dict):
-        _diff_node(old_ap, new_ap, out, tool, f"{path}.additionalProperties", side)
-    elif isinstance(old_ap, dict) and new_ap is False:
-        if side == "request":
-            _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING, "additionalProperties 从 schema 改为 false")
-    elif old_ap is not False and new_ap is False:
-        if side == "request":
-            _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING, "additionalProperties 改为 false")
+    # 先把 True / None 归一到"无约束"
+    old_ap_unbounded = old_ap is None or old_ap is True
 
+    if isinstance(old_ap, dict) and isinstance(new_ap, dict):
+        # schema → schema：递归比
+        _diff_node(old_ap, new_ap, out, tool, f"{path}.additionalProperties", side)
+
+    elif old_ap_unbounded and isinstance(new_ap, dict):
+        # 无约束 → schema：收紧（原来任意字段都合法，现在受类型约束）
+        if side == "request":
+            _add(out, tool, f"{path}.additionalProperties", "additional_props_tightened", BREAKING,
+                 "additionalProperties 由无约束改为 schema（老调用多传的字段可能非法）")
+
+    elif isinstance(old_ap, dict) and new_ap is False:
+        # schema → false：改为拒绝（保留原逻辑）
+        if side == "request":
+            _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING,
+                 "additionalProperties 从 schema 改为 false")
+
+    elif new_ap is False:
+        # 剩下所有 → false（含 None/True → false）：一律拒绝
+        if side == "request":
+            _add(out, tool, f"{path}.additionalProperties", "additional_props_closed", BREAKING,
+                 "additionalProperties 改为 false")
 
 def _diff_unsupported(old: dict, new: dict, out: list, tool: str, path: str) -> None:
     for key in sorted(set(old) | set(new)):
@@ -225,10 +240,26 @@ def _diff_unsupported(old: dict, new: dict, out: list, tool: str, path: str) -> 
 
 
 def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
+    # 先处理布尔 schema：false 等价于"拒绝一切"，true 等价于"接受一切"
+    old_is_false = old is False
+    new_is_false = new is False
+
+    if old_is_false and not new_is_false:
+        # false → 任意 = 放宽，静默
+        return
+    if not old_is_false and new_is_false:
+        # 任意 → false = 请求侧收紧，BREAKING
+        if side == "request":
+            _add(out, tool, path, "schema_rejected", BREAKING,
+                 "schema 由可接受改为 false（拒绝一切值）")
+        return
+
+    # 剩下的 True（等价 {}）、dict 都归一化后继续比
     if old is True: old = {}
-    elif old is False: old = {"not": {}}
     if new is True: new = {}
-    elif new is False: new = {"not": {}}
+    if old is False or new is False:
+        # 两边都是 False（无变化）
+        return
 
     if not isinstance(old, dict) or not isinstance(new, dict): return
 
@@ -266,8 +297,13 @@ def _diff_node(old, new, out: list, tool: str, path: str, side: str) -> None:
     elif isinstance(old_items, list) and isinstance(new_items, list):
         for i, (oi, ni) in enumerate(zip(old_items, new_items)):
             _diff_node(oi, ni, out, tool, f"{path}[{i}]", side)
-        if len(new_items) < len(old_items) and side == "request":
-            _add(out, tool, f"{path}.items", "items_restricted", BREAKING, "数组元素变少")
+        if side == "request":
+            if len(new_items) < len(old_items):
+                _add(out, tool, f"{path}.items", "items_restricted", BREAKING,
+                     f"tuple items 从 {len(old_items)} 项缩到 {len(new_items)} 项")
+            elif len(new_items) > len(old_items):
+                _add(out, tool, f"{path}.items", "items_restricted", BREAKING,
+                     f"tuple items 从 {len(old_items)} 项扩到 {len(new_items)} 项（新增位置约束，老数组可能越界）")
     elif side == "request" and not isinstance(old_items, (dict, list)) and isinstance(new_items, (dict, list)):
         _add(out, tool, f"{path}.items", "items_restricted", BREAKING, "新增数组元素约束")
 

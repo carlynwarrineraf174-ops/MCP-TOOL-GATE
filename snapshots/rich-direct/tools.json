@@ -1,0 +1,84 @@
+{
+  "complex_search": {
+    "description": "一个包含数组、枚举、嵌套对象和详细描述的复杂检索工具。",
+    "input_schema": {
+      "properties": {
+        "mode": {
+          "description": "搜索模式",
+          "enum": [
+            "fast",
+            "accurate"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "query": {
+          "description": "搜索关键词",
+          "title": "Query",
+          "type": "string"
+        },
+        "tags": {
+          "description": "标签列表，支持多个",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "tags",
+        "mode"
+      ],
+      "title": "complex_searchArguments",
+      "type": "object"
+    },
+    "output_schema": null
+  },
+  "ship_order": {
+    "description": "一个包含嵌套对象的发货工具。",
+    "input_schema": {
+      "$defs": {
+        "Address": {
+          "properties": {
+            "city": {
+              "description": "城市名称，例如北京",
+              "title": "City",
+              "type": "string"
+            },
+            "street": {
+              "description": "街道信息",
+              "title": "Street",
+              "type": "string"
+            }
+          },
+          "required": [
+            "city",
+            "street"
+          ],
+          "title": "Address",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/Address",
+          "description": "收货地址"
+        },
+        "order_id": {
+          "description": "订单号",
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id",
+        "address"
+      ],
+      "title": "ship_orderArguments",
+      "type": "object"
+    },
+    "output_schema": null
+  }
+}
