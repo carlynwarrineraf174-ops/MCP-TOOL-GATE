@@ -1,15 +1,16 @@
 import logging
-from contextlib import asynccontextmanager, AsyncExitStack
-import inspect
-from pydantic import create_model
-from govern.ratelimit import RateLimiter
-from mcp.server.fastmcp.exceptions import ToolError
-from govern.audit import init_db, record
+from contextlib import AsyncExitStack
+import asyncio
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+# 👇 导入底层的 Server 和类型
+from mcp.server.lowlevel import Server
+from mcp.server.stdio import stdio_server
+import mcp.types as types
+
+from govern.ratelimit import RateLimiter
+from govern.audit import init_db, record
 from govern.settings import settings
 from govern.metrics import (
     TOOL_CALLS_TOTAL,
@@ -18,138 +19,93 @@ from govern.metrics import (
     RATELIMIT_REJECTED_TOTAL
 )
 
-limiter = RateLimiter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("govern.proxy")
 
+limiter = RateLimiter()
 upstream_session: ClientSession = None
-exit_stack = None
 
-@asynccontextmanager
-async def lifespan(mcp_app: FastMCP):
-    global upstream_session, exit_stack
-    exit_stack = AsyncExitStack()
-
-    await init_db()
-
-    logger.info(f"正在连接上游: {settings.upstream_command} {settings.upstream_args}")
-    params = StdioServerParameters(command=settings.upstream_command, args=settings.upstream_args)
-
-    # 关键实现点 3：保证连接成对关闭
-    read, write = await exit_stack.enter_async_context(stdio_client(params))
-    upstream_session = await exit_stack.enter_async_context(ClientSession(read, write))
-    await upstream_session.initialize()
-    logger.info("✅ 成功连接到上游 MCP Server")
-
-    tools = await upstream_session.list_tools()
-
-    for tool in tools.tools:
-        # 关键实现点 1：重新包装成本地函数，但我们必须骗过 FastMCP 的类型解析
-        def create_proxy(t_name, t_desc, t_schema):
-            async def proxy_func(**kwargs):
-                import time
-                start_time = time.time()
-                tenant_id = "default_tenant"
-
-                # 📈 [指标] 并发数 +1
-                TOOL_INFLIGHT.labels(tool=t_name).inc()
+# 👇 核心：创建底层的 Server 实例，而不是 FastMCP
+proxy_server = Server("GovernProxy")
 
 
-                # 检查限流
-                allowed = await limiter.is_allowed(tenant_id, t_name)
-                if not allowed:
-                    logger.warning(f"🛑 拦截！限流生效: {tenant_id} -> {t_name}")
-
-                    # 📈 [指标] 记录一次被限流
-                    TOOL_CALLS_TOTAL.labels(tool=t_name, status="rejected").inc()
-                    RATELIMIT_REJECTED_TOTAL.labels(tenant=tenant_id, tool=t_name).inc()
+@proxy_server.list_tools()
+async def handle_list_tools() -> list[types.Tool]:
+    """原样透传上游的工具列表和 Schema"""
+    # 直接从上游把原版的对象拿过来返回，不做任何解析
+    result = await upstream_session.list_tools()
+    return result.tools
 
 
-                    # 👇 修复：由于它没进 try...finally，需要手动把并发数减 1
-                    TOOL_INFLIGHT.labels(tool=t_name).dec()
+@proxy_server.call_tool()
+async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    """拦截工具调用，附带治理逻辑后原样转发"""
+    import time
+    start_time = time.time()
+    tenant_id = "default_tenant"
+    tool_name = name
+
+    TOOL_INFLIGHT.labels(tool=tool_name).inc()
+
+    # 1. 检查限流
+    allowed = await limiter.is_allowed(tenant_id, tool_name)
+    if not allowed:
+        logger.warning(f"🛑 拦截！限流生效: {tenant_id} -> {tool_name}")
+        TOOL_CALLS_TOTAL.labels(tool=tool_name, status="rejected").inc()
+        RATELIMIT_REJECTED_TOTAL.labels(tenant=tenant_id, tool=tool_name).inc()
+        TOOL_INFLIGHT.labels(tool=tool_name).dec()
+
+        # 异步记审计
+        record(tenant_id, tool_name, arguments, "rejected_ratelimit", 0)
+        # 底层 Server 抛出异常会让客户端收到 JSON-RPC error
+        raise Exception("Rate limit exceeded.")
+
+    logger.info(f"✅ 放行: {tool_name}")
+
+    # 2. 转发给上游
+    try:
+        result = await upstream_session.call_tool(tool_name, arguments)
+        duration = int((time.time() - start_time) * 1000)
+
+        TOOL_DURATION_SECONDS.labels(tool=tool_name).observe(duration / 1000.0)
+        TOOL_CALLS_TOTAL.labels(tool=tool_name, status="ok").inc()
+        record(tenant_id, tool_name, arguments, "ok", duration)
+
+        # 返回上游原始的内容结构
+        return result.content
+
+    except Exception as e:
+        duration = int((time.time() - start_time) * 1000)
+        TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()
+        record(tenant_id, tool_name, arguments, "upstream_error", duration)
+        raise e
+    finally:
+        TOOL_INFLIGHT.labels(tool=tool_name).dec()
 
 
-                    # 记一条被拦截的审计
-                    record(tenant_id, t_name, kwargs, "rejected_ratelimit", int((time.time() - start_time) * 1000))
-                    raise ToolError("Rate limit exceeded.")
+async def main():
+    """程序的主入口：连接上游 -> 启动自身"""
+    global upstream_session
+    async with AsyncExitStack() as stack:
+        # 1. 初始化数据库
+        await init_db()
 
-                logger.info(f"✅ 放行: {t_name}")
-
-                # 转发
-                try:
-                    result = await upstream_session.call_tool(t_name, kwargs)
-                    duration = int((time.time() - start_time) * 1000)
-
-                    # 📈 [指标] 记录耗时，记录成功状态
-                    TOOL_DURATION_SECONDS.labels(tool=t_name).observe(duration)
-                    TOOL_CALLS_TOTAL.labels(tool=t_name, status="ok").inc()
-
-
-                    # 记录成功的审计
-                    record(tenant_id, t_name, kwargs, "ok", duration)
-                    return result.content
-                except Exception as e:
-
-                    # 📈 [指标] 记录失败状态
-                    TOOL_CALLS_TOTAL.labels(tool=t_name, status="error").inc()
-
-
-                    duration = int((time.time() - start_time) * 1000)
-                    # 记录失败的审计
-                    record(tenant_id, t_name, kwargs, "upstream_error", duration)
-                    raise e
-                finally:
-                    # 📈 [指标] 无论成功失败，离开时并发数 -1
-                    TOOL_INFLIGHT.labels(tool=t_name).dec()
-
-            # 动态生成一个假的 Pydantic 模型，强行把原版 Schema 塞给 FastMCP
-            props = t_schema.get("properties", {})
-            required = t_schema.get("required", [])
-            fields = {}
-            for k, v in props.items():
-                # 1. 映射基本类型
-                py_type = str if v.get("type") == "string" else int if v.get("type") == "integer" else float if v.get(
-                    "type") == "number" else bool if v.get("type") == "boolean" else dict
-
-                # 2. 完美提取原版的默认值
-                if k in required:
-                    default = ...  # 必填
-                elif "default" in v:
-                    default = v["default"]  # 如果有原版默认值，直接用！
-                else:
-                    default = None
-
-                fields[k] = (py_type, default)
-
-            if fields:
-                args_model = create_model(f"{t_name}_args", **fields)
-                # 暴力修改函数的签名，骗过 FastMCP
-                proxy_func.__signature__ = inspect.Signature(
-                    parameters=[
-                        inspect.Parameter(
-                            name=param,
-                            kind=inspect.Parameter.KEYWORD_ONLY,
-                            default=field.default,
-                            annotation=field.annotation
-                        ) for param, field in args_model.model_fields.items()
-                    ]
-                )
-
-            proxy_func.__name__ = t_name
-            proxy_func.__doc__ = t_desc
-            return proxy_func
-
-        # 注册
-        proxy_mcp.add_tool(
-            create_proxy(tool.name, tool.description, tool.inputSchema),
-            name=tool.name,
-            description=tool.description
+        logger.info(f"正在连接上游: {settings.upstream_command} {settings.upstream_args}")
+        params = StdioServerParameters(
+            command=settings.upstream_command,
+            args=settings.upstream_args
         )
 
-    yield
+        # 2. 连接上游 Server
+        read, write = await stack.enter_async_context(stdio_client(params))
+        upstream_session = await stack.enter_async_context(ClientSession(read, write))
+        await upstream_session.initialize()
+        logger.info("✅ 成功连接到上游 MCP Server")
 
-    logger.info("正在关闭上游连接...")
-    await exit_stack.aclose()
-
-# 绑定 lifespan
-proxy_mcp = FastMCP("GovernProxy", lifespan=lifespan)
+        # 3. 作为 Server 启动自身，监听 stdio
+        async with stdio_server() as (read_stream, write_stream):
+            await proxy_server.run(
+                read_stream,
+                write_stream,
+                proxy_server.create_initialization_options()
+            )

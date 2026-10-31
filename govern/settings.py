@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     upstream_command: str = "python"
     # 改回原样
-    upstream_args: list[str] = ["examples/demo_server.py"]
+    upstream_args: list[str] = ["examples/demo_server_rich.py"]
 
     redis_url: str = "redis://localhost:6379/0"
     ratelimit_enabled: bool = False
