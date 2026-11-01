@@ -8,6 +8,8 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.routing import Mount
 from govern.errors import RateLimited, UpstreamError
+import signal
+import asyncio
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -147,16 +149,19 @@ async def main() -> None:
         upstream_session = await stack.enter_async_context(ClientSession(read, write))
         await upstream_session.initialize()
         logger.info(f"✅ 成功连接到上游 MCP Server（transport={transport}）")
-
-        if transport == "stdio":
-            # ===== stdio 模式：给 bench / snapshot / 旧测试脚本用 =====
-            from mcp.server.stdio import stdio_server
-            async with stdio_server() as (stdio_read, stdio_write):
-                await proxy_server.run(
-                    stdio_read,
-                    stdio_write,
-                    proxy_server.create_initialization_options(),
-                )
-        else:
-            # ===== HTTP 模式（默认）：给真实 Agent 用 =====
-            await _serve_http()
+        try:
+            if transport == "stdio":
+                # ===== stdio 模式：给 bench / snapshot / 旧测试脚本用 =====
+                from mcp.server.stdio import stdio_server
+                async with stdio_server() as (stdio_read, stdio_write):
+                    await proxy_server.run(
+                        stdio_read,
+                        stdio_write,
+                        proxy_server.create_initialization_options(),
+                    )
+            else:
+                # ===== HTTP 模式（默认）：给真实 Agent 用 =====
+                await _serve_http()
+        finally:
+            from govern.audit import drain
+            await drain(timeout=5.0)

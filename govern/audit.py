@@ -88,12 +88,29 @@ async def _async_record(tenant: str, tool: str, arguments: dict, status: str, du
                 )
                 session.add(audit)
                 await session.commit()
-                print(f"[DB OK] {status}", file=sys.stderr)  # 强烈建议加上这句看结果
+
         except Exception as e:
             logger.error(f" 审计落库失败: {e}")
+async def drain(timeout: float = 5.0) -> None:
+    """等所有后台审计任务完成；超时则放弃（不让进程卡死）。
+
+    优雅停机时调用：SIGTERM 后先 drain，再退出。
+    """
+    if not _background_tasks:
+        return
+    logger.info(f"等待 {len(_background_tasks)} 个审计任务落库...")
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*_background_tasks, return_exceptions=True),
+            timeout=timeout,
+        )
+        logger.info("✅ 审计任务全部落库")
+    except asyncio.TimeoutError:
+        logger.warning(f"⚠️ 审计任务 {timeout}s 内未完成，放弃剩余 {len(_background_tasks)} 条")
 
 def record(tenant: str, tool: str, arguments: dict, status: str, duration_ms: int):
     task = asyncio.create_task(_async_record(tenant, tool, arguments, status, duration_ms))
     _background_tasks.add(task)
+
     # 任务结束后自动从集合中移除
     task.add_done_callback(_background_tasks.discard)
