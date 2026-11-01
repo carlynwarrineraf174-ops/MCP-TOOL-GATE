@@ -1,68 +1,120 @@
 {
-  "get_weather": {
-    "description": "查询指定城市的天气。",
+  "complex_search": {
+    "description": "一个包含数组、枚举、嵌套对象和详细描述的复杂检索工具。",
     "input_schema": {
       "properties": {
-        "city": {
-          "title": "City",
+        "mode": {
+          "description": "搜索模式",
+          "enum": [
+            "fast",
+            "accurate"
+          ],
+          "title": "Mode",
           "type": "string"
         },
-        "unit": {
-          "default": "c",
-          "title": "Unit",
+        "query": {
+          "description": "搜索关键词",
+          "title": "Query",
           "type": "string"
+        },
+        "tags": {
+          "description": "标签列表，支持多个",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
         }
       },
       "required": [
-        "city"
+        "query",
+        "tags",
+        "mode"
       ],
-      "title": "get_weatherArguments",
+      "title": "complex_searchArguments",
       "type": "object"
     },
     "output_schema": null
   },
-  "query_order": {
-    "description": "按订单号查询订单状态。",
+  "ship_order": {
+    "description": "一个包含嵌套对象的发货工具。",
+    "input_schema": {
+      "$defs": {
+        "Address": {
+          "properties": {
+            "city": {
+              "description": "城市名称，例如北京",
+              "title": "City",
+              "type": "string"
+            },
+            "street": {
+              "description": "街道信息",
+              "title": "Street",
+              "type": "string"
+            }
+          },
+          "required": [
+            "city",
+            "street"
+          ],
+          "title": "Address",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/Address",
+          "description": "收货地址"
+        },
+        "order_id": {
+          "description": "订单号",
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id",
+        "address"
+      ],
+      "title": "ship_orderArguments",
+      "type": "object"
+    },
+    "output_schema": null
+  },
+  "ship_order_structured": {
+    "description": "一个带结构化返回的工具，声明了 outputSchema。",
     "input_schema": {
       "properties": {
         "order_id": {
+          "description": "订单号",
           "title": "Order Id",
           "type": "string"
-        },
-        "with_items": {
-          "default": false,
-          "title": "With Items",
-          "type": "boolean"
         }
       },
       "required": [
         "order_id"
       ],
-      "title": "query_orderArguments",
+      "title": "ship_order_structuredArguments",
       "type": "object"
     },
-    "output_schema": null
-  },
-  "search_doc": {
-    "description": "在知识库里检索相关文档片段。",
-    "input_schema": {
+    "output_schema": {
       "properties": {
-        "query": {
-          "title": "Query",
-          "type": "string"
+        "address": {
+          "additionalProperties": true,
+          "title": "Address",
+          "type": "object"
         },
-        "top_k": {
-          "default": 3,
-          "title": "Top K",
-          "type": "integer"
+        "status": {
+          "title": "Status",
+          "type": "string"
         }
       },
       "required": [
-        "query"
+        "status",
+        "address"
       ],
-      "title": "search_docArguments",
+      "title": "ShipResult",
       "type": "object"
-    },
-    "output_schema": null
+    }
   }
 }

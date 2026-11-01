@@ -1,31 +1,46 @@
+"""手工自检脚本：连正在运行的 HTTP 代理，断言能握手、能拉工具、能透传 structuredContent。
+
+跑法（先起代理：`python govern/proxy.py`）：
+    python test_http_client.py
+
+端口可用 `GOVERN_HTTP_PORT` 覆盖；失败时退出码为 1。
+"""
 import asyncio
+import os
+import sys
+
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+PORT = int(os.environ.get("GOVERN_HTTP_PORT", "8001"))
+URL = f"http://127.0.0.1:{PORT}/mcp/"
 
-async def main():
-    url = "http://127.0.0.1:8001/mcp/"
-    print(f"正在连接: {url}")
-    async with streamablehttp_client(url) as (read, write, _):
+
+def _client_factory(headers=None, timeout=None, auth=None):
+    # trust_env=False：避免被系统代理 / NO_PROXY 里的 [::1] 干扰（httpx 会解析失败）
+    return httpx.AsyncClient(headers=headers, timeout=timeout, auth=auth, trust_env=False)
+
+
+async def main() -> int:
+    async with streamablehttp_client(URL, httpx_client_factory=_client_factory) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            print("✅ 握手成功！")
-
             tools = await session.list_tools()
-            tool_names = [t.name for t in tools.tools]
-            print(f"✅ 成功拉取到工具: {tool_names}")
+            names = [t.name for t in tools.tools]
+            assert names, "工具列表为空：代理没连上上游？"
+            print(f"✅ 握手成功：{URL}")
+            print(f"✅ 拉取到 {len(names)} 个工具: {sorted(names)}")
 
-            # 👇 新增：专门测带 outputSchema 的工具
-            if "ship_order_structured" in tool_names:
-                print("\n--- 测试带 outputSchema 的工具 ---")
+            # 带 outputSchema 的工具：structuredContent 不能丢（N-3 回归）
+            if "ship_order_structured" in names:
                 res = await session.call_tool("ship_order_structured", {"order_id": "A123"})
-                print(f"isError = {res.isError}")
-                print(f"structuredContent = {res.structuredContent}")
-                if res.isError:
-                    print("❌ 失败！代理丢掉了 structuredContent")
-                else:
-                    print("✅ 成功透传 structuredContent")
+                assert res.isError is False, f"带 outputSchema 的工具失败：{res}"
+                assert res.structuredContent is not None, "structuredContent 丢了"
+                assert res.structuredContent.get("status") == "shipped", res.structuredContent
+                print("✅ structuredContent 透传正常")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

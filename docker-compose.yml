@@ -16,10 +16,11 @@ services:
       GOVERN_UPSTREAM_CMD: python
       # 注意：settings 里 upstream_args 是 list[str]，pydantic-settings 会用 json.loads 解析它，
       # 所以这里必须写成合法的 JSON 数组（外层引号是 YAML 的，保证整串是字符串）
-      GOVERN_UPSTREAM_ARGS: '["examples/demo_server.py"]'
+      GOVERN_UPSTREAM_ARGS: '["examples/demo_server_rich.py"]'
     ports:
       # 把容器的 8000 端口暴露给宿主机，浏览器才能看 metrics
       - "8000:8000"
+      - "8001:8001"
     # 👇 这两行是防退出的命根子
     stdin_open: true
     tty: true

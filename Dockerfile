@@ -30,7 +30,7 @@ COPY alembic.ini .
 
 # 7. 暴露端口
 # 声明这个容器会用到 8000 端口（Prometheus 监控端口）
-EXPOSE 8000
+EXPOSE 8000 8001
 
 # 8. 容器启动时的默认命令
 # 注意：Docker 不能直接跑 stdio 模式，因为 stdio 需要前台输入。

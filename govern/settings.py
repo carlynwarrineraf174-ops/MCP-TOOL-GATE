@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     ratelimit_rate: int = 1
     ratelimit_interval: int = 1000
 
+    # HTTP 传输端口（MCP 在 /mcp）；metrics_port=0 表示不启动 Prometheus
+    http_port: int = 8001
+    metrics_port: int = 8000
+
     db_url: str = "sqlite+aiosqlite:///./govern.db"
 
     class Config:

@@ -80,5 +80,41 @@
       "type": "object"
     },
     "output_schema": null
+  },
+  "ship_order_structured": {
+    "description": "一个带结构化返回的工具，声明了 outputSchema。",
+    "input_schema": {
+      "properties": {
+        "order_id": {
+          "description": "订单号",
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "title": "ship_order_structuredArguments",
+      "type": "object"
+    },
+    "output_schema": {
+      "properties": {
+        "address": {
+          "additionalProperties": true,
+          "title": "Address",
+          "type": "object"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "address"
+      ],
+      "title": "ShipResult",
+      "type": "object"
+    }
   }
 }

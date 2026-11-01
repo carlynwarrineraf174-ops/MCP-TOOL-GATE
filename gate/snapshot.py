@@ -45,9 +45,12 @@ def tool_to_dict(tool: object) -> dict:
     }
 
 
-async def capture(server: Path, timeout: float = 30.0) -> dict:
+async def capture(server: Path, timeout: float = 30.0, extra_args: list[str] | None = None) -> dict:
     """起一个 stdio MCP Server 子进程，initialize 之后取 tools/list。"""
-    params = StdioServerParameters(command=sys.executable, args=[str(server)])
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[str(server)] + (extra_args or []),
+    )
 
     async def _list() -> list:
         async with stdio_client(params) as (read, write):
@@ -83,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--server", default="examples/demo_server.py", help="MCP Server 的 .py 路径")
     ap.add_argument("--out", required=True, help="快照输出目录，例如 snapshots/v1")
     ap.add_argument("--timeout", type=float, default=30.0, help="启动 + list 的超时秒数")
+    ap.add_argument("--extra-arg", action="append", default=[],
+                    help="额外传给 server 的参数（可重复），比如 --extra-arg --transport --extra-arg stdio")
     args = ap.parse_args(argv)
 
     server = Path(args.server).resolve()
@@ -90,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[error] 找不到 MCP Server: {server}")
         return 2
 
-    tools = asyncio.run(capture(server, timeout=args.timeout))
+    tools = asyncio.run(capture(server, extra_args=args.extra_arg, timeout=args.timeout))
     meta = write_snapshot(Path(args.out), tools, source=str(server))
     print(f"[ok] {meta['tool_count']} 个工具 -> {args.out}\\tools.json  sha256={meta['sha256_12']}")
     for name in sorted(tools):

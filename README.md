@@ -1,8 +1,8 @@
 # 🛡️ MCP Tool Gate · AI 工具契约门禁 + MCP 治理层
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-53%20passed-brightgreen)
-![Rules](https://img.shields.io/badge/rules-31-blue)
+![Tests](https://img.shields.io/badge/tests-72%20passed-brightgreen)
+![Rules](https://img.shields.io/badge/rules-33-blue)
 ![CI](https://img.shields.io/badge/CI-gate%20enforced-orange)
 ![Govern](https://img.shields.io/badge/govern-proxy%20%7C%20ratelimit%20%7C%20audit%20%7C%20metrics-8A2BE2)
 
@@ -27,10 +27,10 @@ MCP 工具就是 Agent 的"接口"。但接口改坏了，**强类型客户端�
 ## ✅ 它做什么
 
 - **快照**：连任意 stdio MCP Server，把 `tools/list` 落成可 diff 的 JSON（带 `sha256`）
-- **语义 diff**：31 条规则 / 三级严重度（BREAKING · RISKY · SAFE）；`$ref` 展开、`oneOf` 归一化、**请求侧与响应侧分向判定**
+- **语义 diff**：33 条规则 / 三级严重度（BREAKING · RISKY · SAFE）；`$ref` 展开、`oneOf` 归一化、**请求侧与响应侧分向判定**
 - **CI 卡点**：退出码 1 卡住 PR + `report.md`（贴 PR 评论）/ `report.json`（CI artifact）
 - **影响面归因**：漂移 → 自动重跑评测（LangGraph SUT）→ 报出「哪几条用例从对变错、对应哪条变更」
-- **运行期治理**（`govern/`）：stdio 代理 + Redis Lua 令牌桶限流 + 脱敏审计（只存 key 列表与 sha256）+ Prometheus 指标，`docker compose up` 一条命令起 proxy + redis
+- **运行期治理**（`govern/`）：HTTP（`:8001/mcp`）/ stdio 双通道代理 + Redis Lua 令牌桶限流 + 脱敏审计（只存 key 列表与 sha256）+ Prometheus 指标，`docker compose up` 一条命令起 proxy + redis
 
 ## 🎬 真实场景（截图都来自本仓库的 GitHub Actions）
 
@@ -77,28 +77,31 @@ MCP 工具就是 Agent 的"接口"。但接口改坏了，**强类型客户端�
 门禁管的是**合码前**的静态契约；治理层管的是**跑起来之后**的调用。
 
 ```text
-Agent ──MCP(stdio)──▶ govern/proxy.py ──┬─ ① 令牌桶限流（Redis + Lua，原子扣减）
-                                        ├─ ② 脱敏审计（只存 args_keys + sha256）
-                                        ├─ ③ Prometheus 指标（调用数 / 耗时 / 并发 / 拒绝）
-                                        └─ ④ 转发 ──MCP(stdio)──▶ 上游 MCP Server
+Agent ──MCP(HTTP :8001/mcp 或 stdio)──▶ govern/proxy.py
+                                          ├─ ① 令牌桶限流（Redis + Lua，原子扣减）
+                                          ├─ ② 脱敏审计（只存 args_keys + sha256）
+                                          ├─ ③ Prometheus 指标（:8000/metrics）
+                                          └─ ④ 原样转发 ──stdio──▶ 上游 MCP Server
 ```
 
 | 能力 | 实现方式 | 怎么验证 |
 |---|---|---|
-| 透明转发 | 启动时 `tools/list` 拉上游工具，逐个重包成本地 tool；用 `inspect.Signature` 伪造签名，防止框架按 `**kwargs` 重写 schema | 直连 / 过代理各抓一份快照，`sha256` 相同（`snapshots/direct` vs `snapshots/via-govern`） |
-| 限流 | Redis Lua 令牌桶（原子扣减），`burst / rate / interval` 可配；Redis 异常按 `fail-open` / `fail-closed` 降级 | 开限流后 8 并发压 `get_weather`，预期 5 过 3 拒 |
+| 原样透传 | 用 lowlevel `Server`：`list_tools` 直接返回上游 `Tool`，`call_tool` 直接返回上游 `CallToolResult`（`content` 与 `structuredContent` 都不改写） | rich 靶场直连 / 过代理各抓一份快照，`sha256` 相同；带 `outputSchema` 的工具 `structuredContent` 不为空 |
+| 双通道 | 默认 HTTP（`streamable-http`，`:8001/mcp`）；`--transport stdio` 留给 bench / snapshot / 旧客户端 | `python test_http_client.py`；`python -m gate.snapshot --server govern/proxy.py --extra-arg=--transport --extra-arg=stdio --out snapshots/via-govern` |
+| 限流 | Redis Lua 令牌桶（原子扣减），`burst / rate / interval` 可配；Redis 异常按 `fail-open` / `fail-closed` 降级 | 开限流后 6 并发打同一工具，预期 5 过 1 拒；两个租户互不影响 |
 | 审计 | `asyncio.create_task` 异步落库 + `asyncio.Lock` 串行化（绕开 SQLite 写锁），只存参数 key 列表与 sha256 | `select * from tool_audit` 看不到明文 |
-| 指标 | `prometheus_client`，`/metrics` 暴露调用数 / 耗时直方图 / 在飞并发 / 限流拒绝数 | `curl :8000/metrics` |
-| 部署 | `Dockerfile` + `docker-compose.yml`（govern + redis），一处 `docker compose up` | `docker compose ps` 两个容器 Up |
+| 指标 | `prometheus_client`，`:8000/metrics` 暴露调用数 / 耗时 / 在飞并发 / 限流拒绝数 | `curl.exe :8000/metrics` |
+| 部署 | `Dockerfile` + `docker-compose.yml`（govern + redis），映射 8000（指标）与 8001（MCP） | `docker compose ps` 两个容器 Up |
 
 **为什么代理不用「自定义 HTTP 接口」**：Agent 只会说 MCP 协议（`langchain-mcp-adapters` 等），所以治理层必须对下游"就是一个 MCP Server"、对上游"就是一个 MCP Client"，把治理插在中间，而不是另发明一套 API。
 
 **诚实边界（现在的真实状态）**：
 
-- 只走 **stdio**：容器起来后 MCP 在 stdin/stdout 上，8000 端口只有 Prometheus。要让 Agent 通过 HTTP 连，需要改 `streamable-http`（metrics 得挪到别的端口，FastMCP 默认就占 8000），或者按 `docs/治理层实施方案.md` 的路线 B 上 ASGI 中间件。
-- 重打包 schema 对 **数组 / 嵌套对象 / 参数 description / `outputSchema`** 有损；demo 的 3 个工具只有基础类型，所以两份快照才恰好同 sha。
-- 限流默认 `ratelimit_enabled=false`，compose 里也没打开——要演示 429 必须显式设 `GOVERN_RATELIMIT_ENABLED=true`。
-- 审计是后台任务，进程被 kill 时最后几条可能丢（优雅停机还没做）。
+- 限流默认关闭（`ratelimit_enabled=false`）；演示要显式设 `GOVERN_RATELIMIT_ENABLED=true`，且 Redis 不可达 + `fail-open` 时会全部放行。
+- 治理只覆盖 `tools/list` 与 `tools/call`；`resources` / `prompts` 还没走同一道闸（路线 B 的 ASGI 中间件才能全覆盖）。
+- 审计是后台任务，进程被 kill（`SIGTERM`）时最后几条可能丢，优雅停机还没做。
+- `alembic/` 里仍是空迁移，建表实际靠启动时的 `create_all`（P1-6 待办）。
+- 多客户端共享同一条上游 stdio 连接，并发行为还没压测过。
 
 ## ⚡ 快速开始
 
@@ -126,14 +129,19 @@ python -m gate.impact --base snapshots/real-v1 --head snapshots/real-v2
 ### 治理层（proxy + redis）
 
 ```powershell
-pip install -e ".[govern]"           # 治理层依赖（fastapi / uvicorn / sqlalchemy / redis / prometheus…）
-docker compose up -d                 # 一条命令起 govern + redis
-docker compose logs -f govern        # 期望：✅ 成功连接到上游 MCP Server
-curl.exe http://127.0.0.1:8000/metrics   # Prometheus 指标
+pip install -e ".[govern]"           # 治理层依赖（uvicorn / starlette / sqlalchemy / redis / prometheus…）
+docker compose up -d --build         # govern + redis；8000=指标，8001=MCP
+python test_http_client.py           # 握手 + 拉工具 + 验证 structuredContent
+curl.exe http://127.0.0.1:8000/metrics
 
-# 不起 Docker 也可以（限流关闭时不依赖 Redis）
-python govern/proxy.py
-python bench/bench.py                # 直连 vs 过代理 的 p95 对照
+# 想在本地跑，先把容器停掉（否则 8000/8001 被占）
+docker compose down
+python govern/proxy.py               # 默认 HTTP :8001；端口可用 GOVERN_HTTP_PORT 覆盖
+python bench/bench.py                # 内部走 --transport stdio，做直连 vs 代理的 p95 对照
+
+# 限流演示：先以开启限流的方式启动，再另开一个终端跑租户脚本
+$env:GOVERN_RATELIMIT_ENABLED="true"; python govern/proxy.py
+python test_tenant_limit.py          # A/B 各 5 过 1 拒
 ```
 
 ## 🧠 判定引擎：五条设计判断（面试会追问）
@@ -178,10 +186,10 @@ python bench/bench.py                # 直连 vs 过代理 的 p95 对照
 运行期（治理层，与门禁正交）：
 
 ```text
- Agent ──MCP(stdio)──▶ govern/proxy.py ──┬─ 限流（Redis Lua 令牌桶，原子扣减）
-                                         ├─ 审计（脱敏 → SQLite，可换 Postgres）
-                                         ├─ 指标（/metrics: 8000）
-                                         └─ 转发 ──stdio──▶ 上游 MCP Server
+ Agent ──MCP(HTTP :8001/mcp 或 stdio)──▶ govern/proxy.py ──┬─ 限流（Redis Lua 令牌桶）
+                                                            ├─ 审计（脱敏 → SQLite）
+                                                            ├─ 指标（:8000/metrics）
+                                                            └─ 转发 ──stdio──▶ 上游 MCP Server
 ```
 
 ## 📁 目录结构
@@ -190,22 +198,22 @@ python bench/bench.py                # 直连 vs 过代理 的 p95 对照
 mcp-tool-gate/
 ├─ gate/snapshot.py       # 连 MCP Server 取 tools/list，落盘 + sha256
 ├─ gate/diff.py           # 心脏：$ref 展开 / oneOf 归一化 / 请求响应分向
-├─ gate/rules.py          # 31 条规则表（纯数据，每条带"为什么这么判"）
+├─ gate/rules.py          # 33 条规则表（纯数据，每条带"为什么这么判"）
 ├─ gate/check.py          # CLI：报告 + 退出码
 ├─ gate/eval.py           # 评测：三分数 + 多轮区间（条件口径）
 ├─ gate/impact.py         # 漂移 → 受损 case → 对应 finding
-├─ govern/proxy.py        # 治理层入口：metrics + stdio 代理
-├─ govern/app.py          # FastMCP 代理：重包上游工具 + 限流 + 审计
+├─ govern/proxy.py        # 治理层入口：HTTP(:8001) / stdio 双通道 + metrics(:8000)
+├─ govern/app.py          # lowlevel Server：原样透传 + 租户解析 + 限流 + 审计
 ├─ govern/ratelimit.py    # Redis Lua 令牌桶（fail-open / fail-closed）
 ├─ govern/audit.py        # 脱敏审计（args_keys + sha256），SQLAlchemy async
 ├─ govern/metrics.py      # Prometheus：调用数 / 耗时 / 在飞并发 / 拒绝
 ├─ sut/agent.py           # 被测对象：手搭的 LangGraph 图（StateGraph + ToolNode）
 ├─ cases/                 # 30 条 case（20 基础 + 10 歧义）+ fake 答案表（管线自检基线）
-├─ examples/              # demo server / 改坏脚本 / 真实靶场注入
-├─ snapshots/             # v1·v2（假靶场）、real-v1·real-v2（真实靶场）
-├─ tests/                 # 53 个用例，负例优先（目前只覆盖 gate/）
-├─ bench/bench.py         # 直连 vs 过代理 的 p95 对照
-├─ Dockerfile / docker-compose.yml    # govern + redis 一键起
+├─ examples/              # demo server / rich 靶场 / 改坏脚本 / 真实靶场注入
+├─ snapshots/             # v1·v2（假靶场）、real-v1·real-v2、rich-*（透传对照）
+├─ tests/                 # 72 个用例：diff/check/eval/impact/rules + govern e2e/透传
+├─ bench/bench.py         # 直连 vs 过代理 的 p95 对照（stdio）
+├─ Dockerfile / docker-compose.yml    # govern + redis，映射 8000/8001
 ├─ alembic/               # 审计表迁移（目前是空迁移，建表走 create_all）
 ├─ docs/                  # CI 截图（images/）+ 手册与评审文档（*.md 目前未入库）
 ```
@@ -213,7 +221,7 @@ mcp-tool-gate/
 ## 🧪 测试
 
 ```powershell
-python -m unittest discover -s tests -t .     # 53 passed
+python -m unittest discover -s tests -t .     # 72 passed
 ```
 
 **负例比正例重要**：`oneOf` 换序、范围放宽、`title` 改名、快照未变、`nullable` 放宽、去掉 `enum`、输出 schema 换个等价写法（`allOf` 包一层 / 单元素 `type` 数组）—— 这些都必须"不报警"。门禁误报一次，团队就会把它关掉。
@@ -239,8 +247,8 @@ python -m unittest discover -s tests -t .     # 53 passed
 - 语义等价只做到"**写法级**"：`allOf` 包一层、单元素 `type` 数组、空 `required`、元数据变化都不会误报；但 **`format` 的等价**（`date` vs `date-time`）和自定义类型仍转人工 review
 - 分数会抖：`--rounds 3` 只能把标准误压到约一半，**±5pp 以内的差异不要当成提升或退化**
 - 只比 `input_schema` / `output_schema`，不比 examples / annotations
-- 治理层**只走 stdio**：容器里 MCP 在 stdin/stdout 上，8000 只有 Prometheus；HTTP 接入（`streamable-http` 或 ASGI 中间件）还没做
-- 代理重打包 schema 对**数组 / 嵌套对象 / 参数 description / `outputSchema`** 有损；`direct` 与 `via-govern` 同 sha，只因为这 3 个工具都是基础类型
+- 治理层提供 **HTTP（`:8001/mcp`）与 stdio（`--transport stdio`）双通道**，容器映射 8000（指标）+ 8001（MCP）；治理范围只到 `tools/list` / `tools/call`，`resources` / `prompts` 未覆盖
+- 代理已是**原样透传**（lowlevel Server，rich 靶场直连/过代理 `sha256` 相同，`structuredContent` 保留）；代价是它不再帮你修 schema，上游什么样就暴露什么样
 - 限流默认关闭（`ratelimit_enabled=false`，compose 也没开）；审计是后台任务，进程被 kill 会丢尾部几条
 - `alembic/` 里只有一条**空迁移**，建表实际靠启动时的 `create_all` —— 迁移目前只是占位
 - `docs/*.md` 被 `.gitignore` 忽略，克隆下来只剩 CI 截图；三份手册在本地保留，别当它们已入库
@@ -252,11 +260,13 @@ python -m unittest discover -s tests -t .     # 53 passed
 - [x] case 补到 30 条，加入 10 条"一句话同时沾两个工具"的歧义用例
 - [x] `outputSchema` 的**写法级**语义等价归一化（`allOf` / 单元素 type / 空 required / 纯元数据）
 - [x] 用 30 条 case 重跑真实评测，刷新上面的数字
-- [ ] 治理层 HTTP 化：`streamable-http` + 租户头 + 429 JSON-RPC 错误体
-- [ ] 修 `diff` 的漏判（`additionalProperties` 为 schema / tuple `items` / 布尔 schema）与非法数值边界的崩溃
+- [x] 治理层 HTTP 化：`streamable-http` + 租户头（`X-Tenant-Id`）
+- [x] 双通道：`--transport stdio` 保留给 bench / snapshot；默认 HTTP
+- [x] 代理原样透传：`list_tools` / `call_tool` 都不改写 schema 与 `structuredContent`
+- [x] 修 `diff` 的漏判（`additionalProperties` 为 schema / tuple `items` / 布尔 schema）与非法数值边界的崩溃
+- [ ] 429 / JSON-RPC 错误体、优雅停机、Alembic 真实迁移等 P 系列（见 `docs/改进路线图.md`）
 - [ ] CI 加「抓真实 `tools/list` → 比对 baseline」这一步
 - [ ] `format` 与自定义类型的语义等价（需要领域知识，暂留人工）
-- [ ] 其余问题见 `docs/改进路线图.md`（P0~P3 分级，每条带验收标准）
 
 ## 🙏 参考与致谢
 

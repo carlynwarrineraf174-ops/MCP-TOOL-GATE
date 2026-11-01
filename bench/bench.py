@@ -53,7 +53,7 @@ async def main():
     print("⚠️ 请确保 settings.py 里的 ratelimit_enabled = False！\n")
 
     direct = await run_bench("python", ["examples/demo_server.py"], "直连真实工具")
-    proxy = await run_bench("python", ["govern/proxy.py"], "经过治理层代理")
+    proxy = await run_bench("python", ["govern/proxy.py", "--transport", "stdio"], "经过治理层代理")
 
     if direct and proxy:
         print("=== 最终结果对比 ===")
