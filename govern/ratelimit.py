@@ -50,21 +50,21 @@ class RateLimiter:
         self.redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
         self.script = self.redis_client.register_script(TOKEN_BUCKET_LUA)
 
-    async def is_allowed(self, tenant_id: str, tool_name: str, rate: int = 1) -> bool:
+    async def is_allowed(self, tenant_id: str, tool_name: str, rate: int = 1) -> tuple[bool, int]:
         """
-        检查是否允许通过。
-        返回 True 放行，False 拦截。
+        返回 (是否放行, retry_after_ms)。
+        - 放行：(True, 0)
+        - 拒绝：(False, 距下次可重试的毫秒数)
+        - 限流关闭 / fail-open 放行：(True, 0)
+        - fail-closed 拒绝：(False, 1000)  # 兜底 1 秒
         """
         if not settings.ratelimit_enabled:
-            return True
+            return True, 0
 
         now = int(time.time() * 1000)
-        # key: rl:{tenant}:{tool}
         key = f"rl:{tenant_id}:{tool_name}"
 
         try:
-            # 执行 Lua 脚本
-            # 参数含义：max_tokens(桶容量), interval(补充间隔毫秒), refill_rate(每次补多少), now(当前时间), increment_by(消耗多少)
             result = await self.script(
                 keys=[key],
                 args=[
@@ -72,18 +72,21 @@ class RateLimiter:
                     settings.ratelimit_interval,
                     settings.ratelimit_rate,
                     now,
-                    rate
-                ]
+                    rate,
+                ],
             )
             remaining = result[0]
-            return remaining >= 0
+            if remaining >= 0:
+                return True, 0
+            # result[1] = 下次可重试的时间戳（毫秒）
+            retry_after_ms = max(0, int(result[1]) - now)
+            return False, retry_after_ms
 
         except Exception as e:
             logger.error(f"Redis 限流异常: {e}")
-            # 降级策略（fail-open 或 fail-closed）
             if settings.ratelimit_fail_mode == "open":
                 logger.warning("⚠️ 限流组件异常，根据 fail-open 策略，本次请求放行。")
-                return True
+                return True, 0
             else:
                 logger.warning("⚠️ 限流组件异常，根据 fail-closed 策略，本次请求拒绝。")
-                return False
+                return False, 1000
